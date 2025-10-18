@@ -17,6 +17,7 @@ const env = {
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
   YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID,
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
+  MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   VECTOR_DB: process.env.VECTOR_DB || "lancedb",
   LANCEDB_DIR: process.env.LANCEDB_DIR || "./data/lancedb",

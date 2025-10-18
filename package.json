@@ -7,12 +7,14 @@
     "dev": "node src/index.js",
     "start": "node src/index.js",
     "check:youtube": "node src/scripts/check_youtube.js",
+    "index:test": "node src/scripts/index_latest_10.js",
     "test": "vitest"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@lancedb/lancedb": "^0.22.2",
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
     "grammy": "^1.38.3",
