@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "check:youtube": "node src/scripts/check_youtube.js",
     "index:test": "node src/scripts/index_latest_10.js",
+    "search:test": "node src/scripts/search_latest_10.js",
     "test": "vitest"
   },
   "keywords": [],
