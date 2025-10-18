@@ -43,8 +43,9 @@ async function main() {
     details.slice(0, 5).forEach(v => {
       const id = v.id;
       const title = v.snippet?.title;
+      const description = v.snippet?.description;
       const url = `https://youtu.be/${id}`;
-      logger.info({ id, title, url }, "Видео");
+      logger.info({ id, title, description, url }, "Видео");
     });
 
     logger.info("Проверка подключения к YouTube завершена успешно.");
