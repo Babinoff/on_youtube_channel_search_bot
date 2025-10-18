@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "check:youtube": "node src/scripts/check_youtube.js",
     "index:test": "node src/scripts/index_latest_10.js",
+    "index:batch": "node src/scripts/index_batch.js",
     "search:test": "node src/scripts/search_latest_10.js",
     "lock:status": "node src/scripts/lock_status.js",
     "lock:force": "node src/scripts/lock_force.js indexing --force",

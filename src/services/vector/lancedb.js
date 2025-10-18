@@ -54,6 +54,42 @@ async function createTestTable(docs) {
   return { db, table, tableName };
 }
 
+// ===== Channel table helpers =====
+function getChannelTableName(channelId) {
+  return `video_embeddings_${channelId}`;
+}
+
+async function openChannelTableIfExists(channelId) {
+  const db = await connectDb();
+  const name = getChannelTableName(channelId);
+  try {
+    const table = await db.openTable(name);
+    return { db, table, tableName: name };
+  } catch (err) {
+    // not exists
+    return { db, table: null, tableName: name };
+  }
+}
+
+async function createChannelTable(channelId, docs) {
+  const db = await connectDb();
+  const name = getChannelTableName(channelId);
+  const table = await db.createTable(name, docs);
+  return { db, table, tableName: name };
+}
+
+async function addDocsToChannelTable(channelId, docs) {
+  const { db, table, tableName } = await openChannelTableIfExists(channelId);
+  if (!table) {
+    logger.info({ tableName }, "Создаю таблицу канала в LanceDB");
+    const created = await createChannelTable(channelId, docs);
+    return created;
+  }
+  await table.add(docs);
+  logger.info({ tableName, inserted: docs.length }, "Добавлены документы в таблицу канала");
+  return { db, table, tableName };
+}
+
 async function searchTopK(query, k = 5, opts = {}) {
   if (!env.MISTRAL_API_KEY) {
     throw new Error("MISTRAL_API_KEY отсутствует. Заполните .env");
@@ -116,4 +152,4 @@ async function searchTopK(query, k = 5, opts = {}) {
   }));
 }
 
-module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK };
+module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK, getChannelTableName, openChannelTableIfExists, addDocsToChannelTable, createChannelTable }

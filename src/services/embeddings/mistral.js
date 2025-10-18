@@ -69,64 +69,95 @@ async function embedTexts(texts) {
     return results;
   }
 
-  const body = {
-    model: "mistral-embed",
-    input: toFetch,
-  };
+  const batchSize = Math.max(1, Number(env.EMBEDDINGS_BATCH_SIZE || 8));
+  const maxAttempts = Math.max(1, Number(env.EMBEDDINGS_MAX_ATTEMPTS || 5));
+  const timeoutMs = Math.max(1000, Number(env.EMBEDDINGS_TIMEOUT_MS || 30000));
 
-  const maxAttempts = 5; // увеличено для вероятной перегруженности
-  let lastErr;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const resp = await limitEmb(() => axios.post("https://api.mistral.ai/v1/embeddings", body, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 30000,
-      }));
-      const items = resp?.data?.data;
-      if (!Array.isArray(items)) {
-        throw new Error("Некорректный ответ от Mistral embeddings API");
-      }
-      const fetchedVectors = items.map((it) => it.embedding);
-      for (let j = 0; j < fetchedVectors.length; j++) {
-        const idx = fetchIndices[j];
-        const vec = fetchedVectors[j];
-        results[idx] = vec;
-        embeddingsCache.set(texts[idx], vec);
-      }
-      return results;
-    } catch (err) {
-      const status = err?.response?.status;
-      const code = err?.response?.data?.code;
-      const retryAfterHeader = err?.response?.headers?.["retry-after"];
-      const isRetryable = status === 429 || (status >= 500 && status < 600) || code === "3505";
-      logger.error({ err: err?.response?.data || err.message, attempt }, "Ошибка вызова Mistral embeddings");
-      lastErr = err;
-      if (!isRetryable || attempt === maxAttempts) {
-        throw err;
-      }
-      // экспонента + джиттер; учитываем Retry-After, если есть
-      let baseDelayMs = 500 * attempt * attempt; // 0.5s, 2s, 4.5s, 8s, 12s
-      const jitter = Math.floor(Math.random() * 300);
-      let delayMs = baseDelayMs + jitter;
-      if (retryAfterHeader) {
-        const asNumber = Number(retryAfterHeader);
-        if (!Number.isNaN(asNumber) && asNumber > 0) {
-          delayMs = Math.max(delayMs, asNumber * 1000);
-        } else {
-          const asDateMs = Date.parse(retryAfterHeader);
-          if (!Number.isNaN(asDateMs)) {
-            const delta = asDateMs - Date.now();
-            if (delta > 0) delayMs = Math.max(delayMs, delta);
-          }
+  function computeDelay(attempt, retryAfterHeader) {
+    let baseDelayMs = 500 * attempt * attempt; // 0.5s, 2s, 4.5s, 8s, 12s
+    const jitter = Math.floor(Math.random() * 300);
+    let delayMs = baseDelayMs + jitter;
+    if (retryAfterHeader) {
+      const asNumber = Number(retryAfterHeader);
+      if (!Number.isNaN(asNumber) && asNumber > 0) {
+        delayMs = Math.max(delayMs, asNumber * 1000);
+      } else {
+        const asDateMs = Date.parse(retryAfterHeader);
+        if (!Number.isNaN(asDateMs)) {
+          const delta = asDateMs - Date.now();
+          if (delta > 0) delayMs = Math.max(delayMs, delta);
         }
       }
-      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    return delayMs;
+  }
+
+  function isCapacityOrSize(err) {
+    const status = err?.response?.status;
+    const code = err?.response?.data?.code;
+    const msg = String(err?.response?.data?.error?.message || err?.message || '').toLowerCase();
+    return status === 413 || code === '3505' || msg.includes('capacity');
+  }
+
+  function isRetryable(err) {
+    const status = err?.response?.status;
+    return status === 429 || (status >= 500 && status < 600) || isCapacityOrSize(err);
+  }
+
+  async function fetchChunk(chunkTexts, chunkIndices) {
+    let attempt = 1;
+    while (attempt <= maxAttempts) {
+      try {
+        const body = { model: "mistral-embed", input: chunkTexts };
+        const resp = await limitEmb(() => axios.post("https://api.mistral.ai/v1/embeddings", body, {
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          timeout: timeoutMs,
+        }));
+        const items = resp?.data?.data;
+        if (!Array.isArray(items) || items.length !== chunkTexts.length) {
+          throw new Error("Некорректный ответ от Mistral embeddings API (size mismatch)");
+        }
+        for (let j = 0; j < items.length; j++) {
+          const idx = chunkIndices[j];
+          const vec = items[j]?.embedding;
+          results[idx] = vec;
+          embeddingsCache.set(texts[idx], vec);
+        }
+        return; // success
+      } catch (err) {
+        const retryAfter = err?.response?.headers?.["retry-after"];
+        const capacity = isCapacityOrSize(err);
+        const retryable = isRetryable(err);
+        logger.warn({ err: err?.response?.data || err.message, attempt, chunkSize: chunkTexts.length }, "Ошибка Mistral embeddings; применяю ретрай/деление");
+
+        // If capacity/payload issue and chunk > 1, split and recurse immediately
+        if (capacity && chunkTexts.length > 1) {
+          const mid = Math.floor(chunkTexts.length / 2);
+          await fetchChunk(chunkTexts.slice(0, mid), chunkIndices.slice(0, mid));
+          await fetchChunk(chunkTexts.slice(mid), chunkIndices.slice(mid));
+          return;
+        }
+
+        if (!retryable || attempt === maxAttempts) {
+          logger.error({ err: err?.response?.data || err.message, chunkSize: chunkTexts.length }, "Не удалось получить эмбеддинги для части; пропускаю");
+          // Mark as undefined so индексатор может отфильтровать
+          for (const idx of chunkIndices) results[idx] = undefined;
+          return;
+        }
+        const delayMs = computeDelay(attempt, retryAfter);
+        await new Promise((r) => setTimeout(r, delayMs));
+        attempt++;
+      }
     }
   }
-  throw lastErr || new Error("Не удалось получить эмбеддинги");
+
+  for (let s = 0; s < toFetch.length; s += batchSize) {
+    const chunkTexts = toFetch.slice(s, s + batchSize);
+    const chunkIndices = fetchIndices.slice(s, s + batchSize);
+    await fetchChunk(chunkTexts, chunkIndices);
+  }
+
+  return results;
 }
 
 module.exports = { embedTexts };

@@ -31,6 +31,15 @@ const env = {
   INDEX_DESC_MAX_CHARS: Number(process.env.INDEX_DESC_MAX_CHARS || 100),
   INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'ПОДДЕРЖАТЬ НАС МОЖНО|+++|По вопросам сотрудничества|подписывайтесь|subscribe|донат|donate|patreon|boosty|ссылки|links',
   INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
+  // Stop uploads pagination when first known videoId encountered (prod=true, dev=false)
+  INDEX_STOP_ON_FIRST_KNOWN: ["1","true","yes","on"].includes(String(process.env.INDEX_STOP_ON_FIRST_KNOWN || "false").toLowerCase()),
+  // Embeddings robustness
+  EMBEDDINGS_BATCH_SIZE: Number(process.env.EMBEDDINGS_BATCH_SIZE || 8),
+  EMBEDDINGS_MAX_ATTEMPTS: Number(process.env.EMBEDDINGS_MAX_ATTEMPTS || 5),
+  EMBEDDINGS_TIMEOUT_MS: Number(process.env.EMBEDDINGS_TIMEOUT_MS || 30000),
+  // LanceDB insert robustness
+  LANCEDB_INSERT_BATCH_SIZE: Number(process.env.LANCEDB_INSERT_BATCH_SIZE || 50),
+  LANCEDB_INSERT_MAX_ATTEMPTS: Number(process.env.LANCEDB_INSERT_MAX_ATTEMPTS || 3),
   require: (name) => requireEnv(name),
 };
 
