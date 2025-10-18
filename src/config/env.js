@@ -30,6 +30,7 @@ const env = {
   INDEX_DESC_MAX_TOKENS: Number(process.env.INDEX_DESC_MAX_TOKENS || 100),
   INDEX_DESC_MAX_CHARS: Number(process.env.INDEX_DESC_MAX_CHARS || 100),
   INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'ПОДДЕРЖАТЬ НАС МОЖНО|+++|По вопросам сотрудничества|подписывайтесь|subscribe|донат|donate|patreon|boosty|ссылки|links',
+  INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
   require: (name) => requireEnv(name),
 };
 

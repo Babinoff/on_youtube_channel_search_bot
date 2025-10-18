@@ -9,6 +9,9 @@
     "check:youtube": "node src/scripts/check_youtube.js",
     "index:test": "node src/scripts/index_latest_10.js",
     "search:test": "node src/scripts/search_latest_10.js",
+    "lock:status": "node src/scripts/lock_status.js",
+    "lock:force": "node src/scripts/lock_force.js indexing --force",
+    "channel:count": "node src/scripts/channel_count.js",
     "test": "vitest"
   },
   "keywords": [],

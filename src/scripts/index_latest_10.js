@@ -39,16 +39,41 @@ function truncateByChars(text, maxChars) {
   return text.length > m ? text.slice(0, m) : text;
 }
 
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripAdLines(text) {
+  const raw = text || "";
+  const charsCsv = env.INDEX_DESC_AD_LINE_PREFIX_CHARS || "";
+  const chars = charsCsv.split(",").map(s => s.trim()).filter(Boolean);
+  if (!chars.length) return raw;
+  const re = new RegExp(`^\\s*(?:${chars.map(c => escapeRegex(c)).join("|")})\\s*`, "i");
+  const lines = raw.split(/\r?\n/);
+  const filtered = lines.filter(l => !re.test(l));
+  return filtered.join("\n");
+}
+
 function normalizeDescriptionForIndex(desc) {
-  let s = cleanText(desc || "");
+  let s = desc || "";
+  s = stripAdLines(s);
   s = stripAfterPatterns(s);
+  s = cleanText(s);
   s = truncateByTokens(s, env.INDEX_DESC_MAX_TOKENS);
   s = truncateByChars(s, env.INDEX_DESC_MAX_CHARS);
   return s;
 }
 
+function startLockHeartbeat(name, intervalMs = 10000) {
+  const timer = setInterval(() => {
+    updateLockMeta(name, { heartbeatAt: new Date().toISOString() }).catch(() => {});
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
+
 async function main() {
   let lockAcquired = false;
+  let stopHeartbeat = null;
   try {
     if (!env.YOUTUBE_API_KEY) {
       logger.error("YOUTUBE_API_KEY отсутствует. Заполните .env и повторите.");
@@ -72,6 +97,7 @@ async function main() {
       logger.warn("Индексация уже выполняется в другом процессе. Повторите позже.");
       process.exit(0);
     }
+    stopHeartbeat = startLockHeartbeat('indexing', 10000);
     await updateLockMeta('indexing', { stage: 'resolve_channel', input });
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
@@ -126,7 +152,6 @@ async function main() {
     const { tableName } = await createTestTable(docs);
     logger.info({ tableName, inserted: docs.length }, "Тестовая таблица создана и заполнена");
 
-    // Простой sanity‑лог первого документа
     const sample = docs[0];
     if (sample) {
       logger.info({ id: sample.id, title: sample.title, url: sample.url, vectorDims: sample.vector?.length, descIndexedLen: sample.description_indexed.length }, "Пример записи");
@@ -138,6 +163,7 @@ async function main() {
     const data = err?.response?.data;
     logger.error({ err: data || err.message }, "Ошибка при тестовой индексации YouTube → LanceDB");
   } finally {
+    if (stopHeartbeat) stopHeartbeat();
     if (lockAcquired) {
       try { await releaseLock('indexing'); } catch (_) {}
     }

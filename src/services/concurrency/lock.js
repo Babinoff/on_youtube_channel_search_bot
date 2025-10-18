@@ -79,6 +79,12 @@ async function readLockInfo(name) {
   try {
     const buf = await fsp.readFile(p, { encoding: 'utf8' });
     const json = JSON.parse(buf);
+    // attach file stat for updatedAt/size
+    try {
+      const st = await fsp.stat(p);
+      json.updatedAt = st.mtime.toISOString();
+      json.size = st.size;
+    } catch (_) {}
     return json;
   } catch (err) {
     if (err && (err.code === 'ENOENT' || err.code === 'EISDIR')) return null;
@@ -101,6 +107,27 @@ async function updateLockMeta(name, patch = {}) {
   }
 }
 
+function isProcessAlive(pid) {
+  try {
+    if (!pid || typeof pid !== 'number') return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // On Windows EPERM can mean lack of permission -> assume alive
+    if (err && (err.code === 'ESRCH' || err.code === 'EINVAL')) return false;
+    return true;
+  }
+}
+
+async function isLockStale(name, { maxAgeMs = 120000 } = {}) {
+  const info = await readLockInfo(name);
+  if (!info) return false;
+  const upd = info.updatedAt ? new Date(info.updatedAt).getTime() : 0;
+  const ageMs = upd ? Date.now() - upd : Infinity;
+  const alive = isProcessAlive(info.pid);
+  return !alive || ageMs > maxAgeMs;
+}
+
 module.exports = {
   isLocked,
   acquireLock,
@@ -110,4 +137,6 @@ module.exports = {
   LOCK_DIR,
   readLockInfo,
   updateLockMeta,
+  isProcessAlive,
+  isLockStale,
 };

@@ -67,13 +67,15 @@ async function searchTopK(query, k = 5, opts = {}) {
     const total = info?.meta?.total;
     const current = info?.meta?.current;
     const startedAt = info?.startedAt;
+    const updatedAt = info?.updatedAt;
 
-    logger.warn("Индексация в процессе. Ожидание освобождения lock...", { stage, current, total, startedAt });
+    logger.warn("Индексация в процессе. Ожидание освобождения lock...", { stage, current, total, startedAt, updatedAt });
     const unlocked = await waitForUnlock('indexing', { timeoutMs: 15000, checkIntervalMs: 500 });
     if (!unlocked) {
       const statusPart = stage ? `Статус: ${stage}${typeof current==='number' && typeof total==='number' ? ` (${current}/${total})` : ''}.` : '';
       const startedPart = startedAt ? ` Начато: ${startedAt}.` : '';
-      throw new Error(`Поиск временно недоступен: идёт индексация. ${statusPart}${startedPart}`);
+      const updatedPart = updatedAt ? ` Обновлено: ${updatedAt}.` : '';
+      throw new Error(`Поиск временно недоступен: идёт индексация. ${statusPart}${startedPart}${updatedPart}`);
     }
   }
 
