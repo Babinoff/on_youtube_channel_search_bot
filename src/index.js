@@ -56,6 +56,8 @@ async function main() {
       "Если канал не указан, используется YOUTUBE_CHANNEL_ID из .env.",
       "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
       "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
+      "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
+      "/threshold <число> — установить глобальный порог (без перезапуска)",
     ].join("\n"));
   });
 
@@ -88,14 +90,27 @@ async function main() {
     try {
       if (!requireEnvOrWarn("MISTRAL_API_KEY", ctx)) return;
       const text = ctx.message?.text || "";
-      const query = text.split(" ").slice(1).join(" ").trim();
-      if (!query) {
-        await ctx.reply("Использование: /search <запрос>");
+      const raw = text.split(" ").slice(1).join(" ").trim();
+      if (!raw) {
+        await ctx.reply("Использование: /search <запрос> | threshold=0.75");
         return;
       }
-      const results = await searchTopK(query, 5);
+      // Позволяем указать порог через суффикс "| threshold=0.75"
+      const parts = raw.split("|");
+      const query = parts[0].trim();
+      let maxDistance = env.SEARCH_MAX_DISTANCE;
+      const extra = parts[1] && parts[1].trim();
+      if (extra) {
+        const m = extra.match(/threshold\s*=\s*([0-9]*\.?[0-9]+)/i);
+        if (m) {
+          const v = parseFloat(m[1]);
+          if (!Number.isNaN(v)) maxDistance = v;
+        }
+      }
+
+      const results = await searchTopK(query, 5, { maxDistance });
       if (!results.length) {
-        await ctx.reply("Нет результатов.");
+        await ctx.reply(`Нет результатов при пороге ${maxDistance}. Попробуйте изменить threshold или другой запрос.`);
         return;
       }
       const lines = results.map(r => `${r.index}. ${r.title}\n${r.url}${r.score !== undefined ? `\nscore: ${r.score}` : ""}`);
@@ -105,6 +120,19 @@ async function main() {
       logger.error({ err: msg }, "Ошибка /search");
       await ctx.reply(`Ошибка: ${msg}`);
     }
+  });
+
+  // Команда для установки глобального порога
+  bot.command("threshold", async (ctx) => {
+    const text = ctx.message?.text || "";
+    const m = text.match(/\/threshold\s+([0-9]*\.?[0-9]+)/i);
+    if (!m) {
+      return ctx.reply("Использование: /threshold <число>. Пример: /threshold 0.75");
+    }
+    const v = parseFloat(m[1]);
+    if (Number.isNaN(v)) return ctx.reply("Некорректное число.");
+    env.SEARCH_MAX_DISTANCE = v;
+    return ctx.reply(`Глобальный порог обновлён: ${v}`);
   });
 
   // Запуск polling

@@ -53,7 +53,7 @@ async function createTestTable(docs) {
   return { db, table, tableName };
 }
 
-async function searchTopK(query, k = 5) {
+async function searchTopK(query, k = 5, opts = {}) {
   if (!env.MISTRAL_API_KEY) {
     throw new Error("MISTRAL_API_KEY отсутствует. Заполните .env");
   }
@@ -86,8 +86,17 @@ async function searchTopK(query, k = 5) {
   const rows = Array.isArray(res)
     ? res
     : (typeof res?.toArray === "function" ? res.toArray() : []);
-  logger.info({ tableName, k, count: rows.length }, "Поиск LanceDB завершён");
-  return rows.map((r, i) => ({
+
+  // Пороговая фильтрация по дистанции (score): сохраняем только близкие матчи
+  const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;
+  const filtered = rows.filter((r) => {
+    const d = r._distance ?? r.distance ?? r.score;
+    return typeof d === 'number' ? d <= maxDistance : true;
+  });
+  const finalRows = filtered.length ? filtered : rows;
+
+  logger.info({ tableName, k, count: finalRows.length, maxDistance }, "Поиск LanceDB завершён");
+  return finalRows.map((r, i) => ({
     index: i + 1,
     id: r.id,
     title: r.title || r.snippet?.title || "(без названия)",

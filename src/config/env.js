@@ -24,6 +24,7 @@ const env = {
   DATABASE_URL: process.env.DATABASE_URL || "./data/db.sqlite",
   EMBEDDINGS_MAX_CONCURRENCY: Number(process.env.EMBEDDINGS_MAX_CONCURRENCY || 1),
   EMBEDDINGS_CACHE_SIZE: Number(process.env.EMBEDDINGS_CACHE_SIZE || 200),
+  SEARCH_MAX_DISTANCE: Number(process.env.SEARCH_MAX_DISTANCE || 0.7),
   require: (name) => requireEnv(name),
 };
 
