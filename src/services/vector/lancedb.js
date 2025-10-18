@@ -73,7 +73,16 @@ async function searchTopK(query, k = 5) {
     throw new Error("Не удалось получить эмбеддинг запроса");
   }
   const { tableName, table } = await openLatestTestTable();
-  const res = await table.search(qVec).limit(k).execute();
+
+  // Совместимость с разными версиями LanceDB: prefer vectorSearch() если доступен
+  const qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
+  let res;
+  if (typeof qb.toArray === 'function') {
+    res = await qb.limit(k).toArray();
+  } else {
+    res = await qb.limit(k).execute();
+  }
+
   const rows = Array.isArray(res)
     ? res
     : (typeof res?.toArray === "function" ? res.toArray() : []);

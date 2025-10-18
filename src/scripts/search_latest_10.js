@@ -20,10 +20,10 @@ async function main() {
     }
 
     const { tableName, table } = await openLatestTestTable();
-    const res = await table.search(qVec).limit(5).execute();
-    const results = Array.isArray(res)
-      ? res
-      : (typeof res?.toArray === "function" ? res.toArray() : []);
+    const qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
+    const results = typeof qb.toArray === 'function'
+      ? await qb.limit(5).toArray()
+      : await qb.limit(5).execute();
 
     if (!results || results.length === 0) {
       logger.info("Нет результатов");
