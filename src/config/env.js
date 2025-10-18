@@ -22,6 +22,8 @@ const env = {
   VECTOR_DB: process.env.VECTOR_DB || "lancedb",
   LANCEDB_DIR: process.env.LANCEDB_DIR || "./data/lancedb",
   DATABASE_URL: process.env.DATABASE_URL || "./data/db.sqlite",
+  EMBEDDINGS_MAX_CONCURRENCY: Number(process.env.EMBEDDINGS_MAX_CONCURRENCY || 1),
+  EMBEDDINGS_CACHE_SIZE: Number(process.env.EMBEDDINGS_CACHE_SIZE || 200),
   require: (name) => requireEnv(name),
 };
 

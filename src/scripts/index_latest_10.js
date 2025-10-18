@@ -2,6 +2,7 @@ require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
+const { acquireLock, releaseLock } = require("../services/concurrency/lock");
 const { embedTexts } = require("../services/embeddings/mistral");
 const { createTestTable } = require("../services/vector/lancedb");
 
@@ -26,6 +27,13 @@ async function main() {
     if (!input) {
       logger.info("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент: npm run index:test -- <channelId|url|@handle>");
       process.exit(1);
+    }
+
+    let lockAcquired = false;
+    lockAcquired = await acquireLock('indexing', { script: 'index_latest_10.js', input });
+    if (!lockAcquired) {
+      logger.warn("Индексация уже выполняется в другом процессе. Повторите позже.");
+      process.exit(0);
     }
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
@@ -78,9 +86,13 @@ async function main() {
     }
 
     logger.info("Тестовая индексация завершена успешно.");
+    await releaseLock('indexing');
   } catch (err) {
     const data = err?.response?.data;
     logger.error({ err: data || err.message }, "Ошибка при тестовой индексации YouTube → LanceDB");
+    if (typeof lockAcquired !== 'undefined' && lockAcquired) {
+      try { await releaseLock('indexing'); } catch (_) {}
+    }
     process.exit(1);
   }
 }

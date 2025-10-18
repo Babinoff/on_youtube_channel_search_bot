@@ -4,6 +4,7 @@ const path = require("path");
 const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
 const { embedTexts } = require("../embeddings/mistral");
+const { isLocked, waitForUnlock } = require("../concurrency/lock");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -56,6 +57,17 @@ async function searchTopK(query, k = 5) {
   if (!env.MISTRAL_API_KEY) {
     throw new Error("MISTRAL_API_KEY отсутствует. Заполните .env");
   }
+
+  // Если идёт индексация — подождать немного или сообщить пользователю
+  const indexing = await isLocked('indexing');
+  if (indexing) {
+    logger.warn("Индексация в процессе. Ожидание освобождения lock...");
+    const unlocked = await waitForUnlock('indexing', { timeoutMs: 15000, checkIntervalMs: 500 });
+    if (!unlocked) {
+      throw new Error("Поиск временно недоступен: идёт индексация. Попробуйте позже.");
+    }
+  }
+
   const [qVec] = await embedTexts([query]);
   if (!qVec || !Array.isArray(qVec)) {
     throw new Error("Не удалось получить эмбеддинг запроса");
