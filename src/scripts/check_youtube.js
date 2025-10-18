@@ -5,19 +5,27 @@ const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploads
 
 async function main() {
   try {
-    const input = process.argv[2];
+    const inputArg = process.argv[2];
+    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
+    const input = inputEnv || inputArg;
     if (!env.YOUTUBE_API_KEY) {
       logger.error("YOUTUBE_API_KEY отсутствует. Заполните .env и повторите.");
       process.exit(1);
     }
     if (!input) {
-      logger.info("Использование: npm run check:youtube -- <channelId|url|@handle>");
+      logger.info("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент: npm run check:youtube -- <channelId|url|@handle>");
       process.exit(1);
     }
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    logger.info({ input }, "Резолв канала...");
-    const channelId = await resolveChannelId(input, client);
+    logger.info({ inputFrom: inputEnv ? "env" : "argv", input }, "Резолв канала...");
+    let channelId;
+    if (inputEnv) {
+      // Если задан точный идентификатор канала через .env — используем его напрямую
+      channelId = inputEnv;
+    } else {
+      channelId = await resolveChannelId(input, client);
+    }
     logger.info({ channelId }, "Канал определён");
 
     const uploadsId = await getUploadsPlaylistId(channelId, client);
@@ -32,7 +40,6 @@ async function main() {
       details = await getVideosDetails(videoIds.slice(0, 10), client);
     }
 
-    // Выводим несколько примеров
     details.slice(0, 5).forEach(v => {
       const id = v.id;
       const title = v.snippet?.title;

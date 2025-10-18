@@ -15,6 +15,7 @@ const env = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : undefined,
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+  YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID,
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   VECTOR_DB: process.env.VECTOR_DB || "lancedb",
