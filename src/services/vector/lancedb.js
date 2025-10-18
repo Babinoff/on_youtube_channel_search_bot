@@ -5,6 +5,7 @@ const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
 const { embedTexts } = require("../embeddings/mistral");
 const { isLocked, waitForUnlock } = require("../concurrency/lock");
+const { readLockInfo } = require("../concurrency/lock");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -61,10 +62,18 @@ async function searchTopK(query, k = 5, opts = {}) {
   // Если идёт индексация — подождать немного или сообщить пользователю
   const indexing = await isLocked('indexing');
   if (indexing) {
-    logger.warn("Индексация в процессе. Ожидание освобождения lock...");
+    const info = await readLockInfo('indexing');
+    const stage = info?.meta?.stage;
+    const total = info?.meta?.total;
+    const current = info?.meta?.current;
+    const startedAt = info?.startedAt;
+
+    logger.warn("Индексация в процессе. Ожидание освобождения lock...", { stage, current, total, startedAt });
     const unlocked = await waitForUnlock('indexing', { timeoutMs: 15000, checkIntervalMs: 500 });
     if (!unlocked) {
-      throw new Error("Поиск временно недоступен: идёт индексация. Попробуйте позже.");
+      const statusPart = stage ? `Статус: ${stage}${typeof current==='number' && typeof total==='number' ? ` (${current}/${total})` : ''}.` : '';
+      const startedPart = startedAt ? ` Начато: ${startedAt}.` : '';
+      throw new Error(`Поиск временно недоступен: идёт индексация. ${statusPart}${startedPart}`);
     }
   }
 

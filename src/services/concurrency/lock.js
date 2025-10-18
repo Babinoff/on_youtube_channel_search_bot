@@ -73,6 +73,34 @@ async function withLock(name, fn, meta = {}) {
   }
 }
 
+// Read lock info (pid, startedAt, meta)
+async function readLockInfo(name) {
+  const p = getLockPath(name);
+  try {
+    const buf = await fsp.readFile(p, { encoding: 'utf8' });
+    const json = JSON.parse(buf);
+    return json;
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'EISDIR')) return null;
+    throw err;
+  }
+}
+
+// Update meta in existing lock file
+async function updateLockMeta(name, patch = {}) {
+  const p = getLockPath(name);
+  try {
+    const buf = await fsp.readFile(p, { encoding: 'utf8' });
+    const json = JSON.parse(buf);
+    json.meta = { ...(json.meta || {}), ...(patch || {}) };
+    await fsp.writeFile(p, JSON.stringify(json, null, 2), { encoding: 'utf8' });
+    return true;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
 module.exports = {
   isLocked,
   acquireLock,
@@ -80,4 +108,6 @@ module.exports = {
   waitForUnlock,
   withLock,
   LOCK_DIR,
+  readLockInfo,
+  updateLockMeta,
 };

@@ -14,6 +14,56 @@ function requireEnvOrWarn(name, ctx) {
   return val;
 }
 
+// Безопасная отправка длинного текста: разбивает на части по лимиту Telegram (~4096)
+function splitTextByLimit(text, maxLen = 3800) {
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + maxLen, text.length);
+    if (end < text.length) {
+      // попытка разрыва по \n или пробелу
+      let breakPos = text.lastIndexOf("\n", end);
+      if (breakPos <= start) breakPos = text.lastIndexOf(" ", end);
+      if (breakPos <= start) breakPos = end;
+      end = breakPos;
+    }
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
+function splitItemsIntoMessages(items, maxLen = 3800) {
+  const messages = [];
+  let current = "";
+  for (const item of items) {
+    if (item.length > maxLen) {
+      const parts = splitTextByLimit(item, maxLen);
+      for (const p of parts) {
+        if (current) { messages.push(current); current = ""; }
+        messages.push(p);
+      }
+      continue;
+    }
+    const candidate = current ? current + "\n\n" + item : item;
+    if (candidate.length > maxLen) {
+      if (current) messages.push(current);
+      current = item;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) messages.push(current);
+  return messages;
+}
+
+// Ограничение длины описания для вывода /latest, управляется env.LATEST_DESC_MAX_CHARS
+function truncateForLatest(text) {
+  const max = Number(env.LATEST_DESC_MAX_CHARS || 0);
+  if (!max || max <= 0) return text;
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
 async function fetchLatestVideos({ input, limit = 10 }) {
   const client = createYouTubeClient(env.YOUTUBE_API_KEY);
   const channelId = input ? (input.match(/^UC/) ? input : await resolveChannelId(input, client)) : env.YOUTUBE_CHANNEL_ID;
@@ -73,11 +123,16 @@ async function main() {
         await ctx.reply("Видео не найдены.");
         return;
       }
-      const lines = videos.map(v => {
-        const desc = v.description ? `\n${v.description}` : "";
+      const items = videos.map(v => {
+        const descRaw = v.description || "";
+        const descCropped = descRaw ? truncateForLatest(descRaw) : "";
+        const desc = descCropped ? `\n${descCropped}` : "";
         return `${v.title}\n${v.url}${desc}`;
       });
-      await ctx.reply(lines.join("\n\n"));
+      const messages = splitItemsIntoMessages(items, 3800);
+      for (const m of messages) {
+        await ctx.reply(m);
+      }
     } catch (err) {
       const msg = err?.response?.data?.error?.message || err.message || "Ошибка при получении видео";
       logger.error({ err: msg }, "Ошибка /latest");
