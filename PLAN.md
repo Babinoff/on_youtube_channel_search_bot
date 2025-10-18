@@ -32,8 +32,7 @@
 ## Переменные окружения
 - `TELEGRAM_BOT_TOKEN`, `ADMIN_USER_ID`, `YOUTUBE_API_KEY`.
 - `EMBEDDINGS_PROVIDER` (`mistral.ai`), `MISTRAL_API_KEY`.
-- `VECTOR_DB` (`lancedb` | `pinecone`), `LANCEDB_DIR`.
-- `PINECONE_API_KEY`, `PINECONE_INDEX`, `PINECONE_ENV`.
+- `VECTOR_DB` (`lancedb`), `LANCEDB_DIR`.
 - `DATABASE_URL` (напр. `./data/db.sqlite`).
 
 ## Команды бота
