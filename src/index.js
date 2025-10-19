@@ -3,6 +3,8 @@ const { logger } = require("./config/logger");
 const { env } = require("./config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
 const { searchTopK } = require("./services/vector/lancedb");
+const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function requireEnvOrWarn(name, ctx) {
   const val = env[name];
@@ -33,36 +35,11 @@ function splitTextByLimit(text, maxLen = 3800) {
   return chunks;
 }
 
-function splitItemsIntoMessages(items, maxLen = 3800) {
-  const messages = [];
-  let current = "";
-  for (const item of items) {
-    if (item.length > maxLen) {
-      const parts = splitTextByLimit(item, maxLen);
-      for (const p of parts) {
-        if (current) { messages.push(current); current = ""; }
-        messages.push(p);
-      }
-      continue;
-    }
-    const candidate = current ? current + "\n\n" + item : item;
-    if (candidate.length > maxLen) {
-      if (current) messages.push(current);
-      current = item;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current) messages.push(current);
-  return messages;
-}
+// Удаляю вспомогательную склейку сообщений, форматирование теперь в services/telegram/format
+// function splitItemsIntoMessages(...) { /* removed */ }
 
-// Ограничение длины описания для вывода /latest, управляется env.LATEST_DESC_MAX_CHARS
-function truncateForLatest(text) {
-  const max = Number(env.LATEST_DESC_MAX_CHARS || 0);
-  if (!max || max <= 0) return text;
-  return text.length > max ? text.slice(0, max) + "…" : text;
-}
+// Удаляю локальный truncateForLatest, он теперь в services/telegram/format
+// function truncateForLatest(...) { /* removed */ }
 
 async function fetchLatestVideos({ input, limit = 10 }) {
   const client = createYouTubeClient(env.YOUTUBE_API_KEY);
@@ -107,6 +84,7 @@ async function main() {
       "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
       "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
       "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
+      "Можно указать количество результатов: /search <запрос> | k=10",
       "/threshold <число> — установить глобальный порог (без перезапуска)",
     ].join("\n"));
   });
@@ -123,15 +101,14 @@ async function main() {
         await ctx.reply("Видео не найдены.");
         return;
       }
-      const items = videos.map(v => {
-        const descRaw = v.description || "";
-        const descCropped = descRaw ? truncateForLatest(descRaw) : "";
-        const desc = descCropped ? `\n${descCropped}` : "";
-        return `${v.title}\n${v.url}${desc}`;
-      });
-      const messages = splitItemsIntoMessages(items, 3800);
-      for (const m of messages) {
-        await ctx.reply(m);
+      const items = videos.map(v => formatLatestItem(v));
+      // Отправляем по одному сообщению на видео (с учётом лимита длины)
+      for (const item of items) {
+        const parts = splitTextByLimit(item, 3800);
+        for (const p of parts) {
+          await ctx.reply(p);
+          await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
+        }
       }
     } catch (err) {
       const msg = err?.response?.data?.error?.message || err.message || "Ошибка при получении видео";
@@ -147,29 +124,43 @@ async function main() {
       const text = ctx.message?.text || "";
       const raw = text.split(" ").slice(1).join(" ").trim();
       if (!raw) {
-        await ctx.reply("Использование: /search <запрос> | threshold=0.75");
+        await ctx.reply("Использование: /search <запрос> | threshold=0.75 | k=10");
         return;
       }
-      // Позволяем указать порог через суффикс "| threshold=0.75"
-      const parts = raw.split("|");
-      const query = parts[0].trim();
+      // Параметры через суффиксы после "|": threshold=0.75, k=10
+      const partsExtra = raw.split("|");
+      const query = partsExtra[0].trim();
       let maxDistance = env.SEARCH_MAX_DISTANCE;
-      const extra = parts[1] && parts[1].trim();
-      if (extra) {
-        const m = extra.match(/threshold\s*=\s*([0-9]*\.?[0-9]+)/i);
-        if (m) {
-          const v = parseFloat(m[1]);
+      let topK = Number(env.SEARCH_TOP_K || 5);
+      for (let i = 1; i < partsExtra.length; i++) {
+        const extra = partsExtra[i] && partsExtra[i].trim();
+        if (!extra) continue;
+        const mThr = extra.match(/threshold\s*=\s*([0-9]*\.?[0-9]+)/i);
+        if (mThr) {
+          const v = parseFloat(mThr[1]);
           if (!Number.isNaN(v)) maxDistance = v;
+        }
+        const mK = extra.match(/k\s*=\s*([0-9]+)/i);
+        if (mK) {
+          const kVal = parseInt(mK[1], 10);
+          if (!Number.isNaN(kVal) && kVal > 0 && kVal <= 50) topK = kVal;
         }
       }
 
-      const results = await searchTopK(query, 5, { maxDistance });
+      const results = await searchTopK(query, topK, { maxDistance });
       if (!results.length) {
-        await ctx.reply(`Нет результатов при пороге ${maxDistance}. Попробуйте изменить threshold или другой запрос.`);
+        await ctx.reply(`Нет результатов при пороге ${maxDistance}. Попробуйте изменить threshold/k или другой запрос.`);
         return;
       }
-      const lines = results.map(r => `${r.index}. ${r.title}\n${r.url}${r.score !== undefined ? `\nscore: ${r.score}` : ""}`);
-      await ctx.reply(lines.join("\n\n"));
+      // Отправляем по одному сообщению на результат (с учётом лимита длины)
+      for (const r of results) {
+        const line = formatSearchItem(r);
+        const parts = splitTextByLimit(line, 3800);
+        for (const p of parts) {
+          await ctx.reply(p);
+          await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
+        }
+      }
     } catch (err) {
       const msg = err?.response?.data?.error?.message || err.message || "Ошибка при поиске";
       logger.error({ err: msg }, "Ошибка /search");

@@ -119,7 +119,26 @@ async function searchTopK(query, k = 5, opts = {}) {
   if (!qVec || !Array.isArray(qVec)) {
     throw new Error("Не удалось получить эмбеддинг запроса");
   }
-  const { tableName, table } = await openLatestTestTable();
+
+  // Предпочитаем таблицу канала (батч на 500+ видео), если она существует
+  let table;
+  let tableName;
+  if (env.YOUTUBE_CHANNEL_ID) {
+    const opened = await openChannelTableIfExists(env.YOUTUBE_CHANNEL_ID);
+    if (opened.table) {
+      table = opened.table;
+      tableName = opened.tableName;
+      logger.info({ tableName }, "Поиск: использую таблицу канала");
+    } else {
+      logger.warn({ tableName: opened.tableName }, "Поиск: таблица канала не найдена, паду на тестовую");
+    }
+  }
+  if (!table) {
+    const openedTest = await openLatestTestTable();
+    table = openedTest.table;
+    tableName = openedTest.tableName;
+    logger.info({ tableName }, "Поиск: использую тестовую таблицу (latest10)");
+  }
 
   // Совместимость с разными версиями LanceDB: prefer vectorSearch() если доступен
   const qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
@@ -149,6 +168,8 @@ async function searchTopK(query, k = 5, opts = {}) {
     title: r.title || r.snippet?.title || "(без названия)",
     url: r.url || (r.id ? `https://youtu.be/${r.id}` : ""),
     score: r._distance ?? r.score ?? r.distance ?? undefined,
+    description: r.description || r.snippet?.description || "",
+    description_indexed: r.description_indexed || "",
   }));
 }
 

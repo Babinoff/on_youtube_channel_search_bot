@@ -27,6 +27,10 @@ const env = {
   SEARCH_MAX_DISTANCE: Number(process.env.SEARCH_MAX_DISTANCE || 0.7),
   // New limits for descriptions (display and indexing)
   LATEST_DESC_MAX_CHARS: Number(process.env.LATEST_DESC_MAX_CHARS || 200),
+  // Messaging: delay between Telegram messages to avoid rate limits
+  TELEGRAM_SEND_DELAY_MS: Number(process.env.TELEGRAM_SEND_DELAY_MS || 250),
+  // Search defaults
+  SEARCH_TOP_K: Number(process.env.SEARCH_TOP_K || 5),
   INDEX_DESC_MAX_TOKENS: Number(process.env.INDEX_DESC_MAX_TOKENS || 100),
   INDEX_DESC_MAX_CHARS: Number(process.env.INDEX_DESC_MAX_CHARS || 100),
   INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'ПОДДЕРЖАТЬ НАС МОЖНО|+++|По вопросам сотрудничества|подписывайтесь|subscribe|донат|donate|patreon|boosty|ссылки|links',
