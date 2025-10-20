@@ -29,7 +29,8 @@ function formatLatestItem(v) {
   const descRaw = v.description || "";
   const descCropped = descRaw ? truncateForLatest(descRaw) : "";
   const desc = descCropped ? `\n${descCropped}` : "";
-  return `${v.title}\n${v.url}${desc}`;
+  const typeLine = v.type ? `\ntype: ${v.type}` : "";
+  return `${v.title}\n${v.url}${typeLine}${desc}`;
 }
 
 function formatSearchItem(item) {
@@ -46,16 +47,20 @@ function formatSearchItem(item) {
     dateStr = isNaN(dt.getTime()) ? String(rawPublished) : dt.toISOString().split("T")[0];
   }
 
+  const typeStr = item.type ? String(item.type) : null;
+
   const headerLines = [
     `${idxPrefix}${title}`,
     url ? `${url}` : null,
     typeof score !== "undefined" ? `score: ${score}` : null,
     dateStr ? `date: ${dateStr}` : null,
+    typeStr ? `type: ${typeStr}` : null,
   ].filter(Boolean);
 
   const body = desc ? `\n${desc}` : "";
   const text = `${headerLines.join("\n")}${body}`;
-  return splitTextByLimit(text);
+  // Возвращаем строку; разбиение по лимиту выполняет вызывающий код
+  return text;
 }
 
 module.exports = {

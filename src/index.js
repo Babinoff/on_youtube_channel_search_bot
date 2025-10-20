@@ -4,6 +4,7 @@ const { env } = require("./config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
 const { searchTopK } = require("./services/vector/lancedb");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
+const { deriveType } = require("./services/youtube/classify");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function requireEnvOrWarn(name, ctx) {
@@ -55,6 +56,7 @@ async function fetchLatestVideos({ input, limit = 10 }) {
     title: v.snippet?.title || "",
     description: v.snippet?.description || "",
     url: `https://youtu.be/${v.id}`,
+    type: deriveType(v),
   }));
 }
 
@@ -81,10 +83,12 @@ async function main() {
       "Команды:",
       "/latest [канал] — показать последние 10 видео канала.",
       "Если канал не указан, используется YOUTUBE_CHANNEL_ID из .env.",
+      "Поддерживает фильтр типа: /latest [канал] | type=short|stream|video",
       "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
       "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
       "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
       "Можно указать количество результатов: /search <запрос> | k=10",
+      "Фильтр типа результата: /search <запрос> | type=short|stream|video",
       "/threshold <число> — установить глобальный порог (без перезапуска)",
     ].join("\n"));
   });
@@ -94,9 +98,25 @@ async function main() {
     try {
       if (!requireEnvOrWarn("YOUTUBE_API_KEY", ctx)) return;
       const text = ctx.message?.text || "";
-      const arg = text.split(" ").slice(1).join(" ").trim();
-      const input = arg || env.YOUTUBE_CHANNEL_ID;
-      const videos = await fetchLatestVideos({ input, limit: 10 });
+      const argFull = text.split(" ").slice(1).join(" ").trim();
+      const partsExtra = argFull ? argFull.split("|") : [];
+      const channelSpec = partsExtra.length ? partsExtra[0].trim() : argFull;
+      let typeFilter = null;
+      for (let i = 1; i < partsExtra.length; i++) {
+        const extra = partsExtra[i] && partsExtra[i].trim();
+        if (!extra) continue;
+        const mType = extra.match(/type\s*=\s*([a-zA-Z]+)/i);
+        if (mType) {
+          const raw = mType[1].toLowerCase();
+          if (["short","shorts","короткое","шорт","шорты"].includes(raw)) typeFilter = "short";
+          else if (["stream","стрим","live","трансляция"].includes(raw)) typeFilter = "stream";
+          else if (["video","видео","regular","обычное"].includes(raw)) typeFilter = "video";
+        }
+      }
+
+      const input = channelSpec || env.YOUTUBE_CHANNEL_ID;
+      const videosRaw = await fetchLatestVideos({ input, limit: 10 });
+      const videos = typeFilter ? videosRaw.filter(v => (v.type || "video") === typeFilter) : videosRaw;
       if (!videos.length) {
         await ctx.reply("Видео не найдены.");
         return;
@@ -124,14 +144,15 @@ async function main() {
       const text = ctx.message?.text || "";
       const raw = text.split(" ").slice(1).join(" ").trim();
       if (!raw) {
-        await ctx.reply("Использование: /search <запрос> | threshold=0.75 | k=10");
+        await ctx.reply("Использование: /search <запрос> | threshold=0.75 | k=10 | type=short|stream|video");
         return;
       }
-      // Параметры через суффиксы после "|": threshold=0.75, k=10
+      // Параметры через суффиксы после "|": threshold=0.75, k=10, type=short|stream|video
       const partsExtra = raw.split("|");
       const query = partsExtra[0].trim();
       let maxDistance = env.SEARCH_MAX_DISTANCE;
       let topK = Number(env.SEARCH_TOP_K || 5);
+      let typeFilter = null;
       for (let i = 1; i < partsExtra.length; i++) {
         const extra = partsExtra[i] && partsExtra[i].trim();
         if (!extra) continue;
@@ -145,11 +166,23 @@ async function main() {
           const kVal = parseInt(mK[1], 10);
           if (!Number.isNaN(kVal) && kVal > 0 && kVal <= 50) topK = kVal;
         }
+        const mType = extra.match(/type\s*=\s*([a-zA-Z]+)/i);
+        if (mType) {
+          const rawType = mType[1].toLowerCase();
+          if (["short","shorts","короткое","шорт","шорты"].includes(rawType)) typeFilter = "short";
+          else if (["stream","стрим","live","трансляция"].includes(rawType)) typeFilter = "stream";
+          else if (["video","видео","regular","обычное"].includes(rawType)) typeFilter = "video";
+        }
       }
 
-      const results = await searchTopK(query, topK, { maxDistance });
+      const fetchK = typeFilter ? Math.max(topK * 3, topK + 20) : topK;
+      const resultsRaw = await searchTopK(query, fetchK, { maxDistance });
+      const results = typeFilter
+        ? resultsRaw.filter(r => (r.type || "video") === typeFilter).slice(0, topK)
+        : resultsRaw;
+
       if (!results.length) {
-        await ctx.reply(`Нет результатов при пороге ${maxDistance}. Попробуйте изменить threshold/k или другой запрос.`);
+        await ctx.reply(`Нет результатов при пороге ${maxDistance}${typeFilter ? ` и типе ${typeFilter}` : ""}. Попробуйте изменить threshold/k/type или другой запрос.`);
         return;
       }
       // Отправляем по одному сообщению на результат (с учётом лимита длины)

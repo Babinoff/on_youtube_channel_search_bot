@@ -170,6 +170,7 @@ async function searchTopK(query, k = 5, opts = {}) {
     score: r._distance ?? r.score ?? r.distance ?? undefined,
     description_indexed: r.description_indexed || "",
     published_at: r.published_at || r.snippet?.publishedAt || null,
+    type: r.type || null,
   }));
 }
 

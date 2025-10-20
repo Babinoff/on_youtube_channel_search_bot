@@ -86,7 +86,7 @@ async function listUploadsVideos(uploadsPlaylistId, client, pageToken) {
 async function getVideosDetails(videoIds, client) {
   const c = client || createYouTubeClient();
   const resp = await c.get("/videos", {
-    params: { part: "snippet,contentDetails", id: videoIds.join(",") },
+    params: { part: "snippet,contentDetails,liveStreamingDetails", id: videoIds.join(",") },
   });
   return resp.data.items || [];
 }

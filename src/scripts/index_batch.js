@@ -2,6 +2,7 @@ require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
+const { deriveType } = require("../services/youtube/classify");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
 const { embedTexts } = require("../services/embeddings/mistral");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
@@ -201,6 +202,7 @@ async function main() {
       const url = `https://youtu.be/${id}`;
       const publishedAt = v.snippet?.publishedAt || null;
       const etag = v.etag || null;
+      const type = deriveType(v);
       return {
         id,
         title,
@@ -209,6 +211,7 @@ async function main() {
         channel_id: channelId,
         published_at: publishedAt,
         etag,
+        type,
         last_indexed_at: new Date().toISOString(),
       };
     });

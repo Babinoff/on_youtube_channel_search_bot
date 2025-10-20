@@ -2,6 +2,7 @@ require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
+const { deriveType } = require("../services/youtube/classify");
 
 // --- Text normalization (exactly mirrors indexing behavior; ONLY uses env) ---
 function cleanText(s) {
@@ -99,6 +100,7 @@ async function main() {
     const url = `https://youtu.be/${id}`;
     const publishedAt = v.snippet?.publishedAt || null;
     const etag = v.etag || null;
+    const type = deriveType(v);
     return {
       id,
       title,
@@ -108,6 +110,7 @@ async function main() {
       channel_id: channelId,
       published_at: publishedAt,
       etag,
+      type,
       last_indexed_at: new Date().toISOString(),
       _preview_index: idx + 1,
     };
@@ -117,7 +120,7 @@ async function main() {
   docsMeta.forEach((d, i) => {
     const dateStr = formatDateYYYYMMDD(d.published_at) || String(d.published_at || "");
     const header = `=== [${i + 1}/${docsMeta.length}] ${d.title}`;
-    const meta = `id: ${d.id} | date: ${dateStr} | ${d.url}`;
+    const meta = `id: ${d.id} | date: ${dateStr} | type: ${d.type} | ${d.url}`;
     const rawLen = (d.description || "").length;
     const idxLen = (d.description_indexed || "").length;
 
@@ -136,6 +139,7 @@ async function main() {
       channel_id: d.channel_id,
       published_at: d.published_at,
       etag: d.etag,
+      type: d.type,
       last_indexed_at: d.last_indexed_at,
     }, null, 2));
     console.log("\n");
