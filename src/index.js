@@ -3,10 +3,13 @@ const { logger } = require("./config/logger");
 const { env, setGlobalChannelId, validateEnv } = require("./config/env");
 
 const { searchUnified } = require("./services/vector/search");
-const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
+const { splitTextByLimit, formatLatestItem, formatSearchItem } = require("./services/telegram/format");
+const { buildSettingsKeyboard, buildMainKeyboard } = require("./services/telegram/keyboards");
 
 const { fetchLatestVideos } = require("./services/youtube/latest");
+const { ACTIONS, parse } = require("./services/telegram/callbacks");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
+const { setPendingInput, getPendingInput, clearPendingInput, hasPendingInput } = require("./services/telegram/state");
 const { getAdminChannels } = require("./services/admin/channels_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -27,24 +30,7 @@ function requireEnvOrWarn(name, ctx) {
   return val;
 }
 
-// Безопасная отправка длинного текста: разбивает на части по лимиту Telegram (~4096)
-function splitTextByLimit(text, maxLen = 3800) {
-  const chunks = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = Math.min(start + maxLen, text.length);
-    if (end < text.length) {
-      // попытка разрыва по \n или пробелу
-      let breakPos = text.lastIndexOf("\n", end);
-      if (breakPos <= start) breakPos = text.lastIndexOf(" ", end);
-      if (breakPos <= start) breakPos = end;
-      end = breakPos;
-    }
-    chunks.push(text.slice(start, end));
-    start = end;
-  }
-  return chunks;
-}
+
 
 // Удаляю вспомогательную склейку сообщений, форматирование теперь в services/telegram/format
 // function splitItemsIntoMessages(...) { /* removed */ }
@@ -67,21 +53,7 @@ async function main() {
   const bot = new Bot(token);
   const defaultMessage = "Можно запускать следующий поиск.";
 
-  // Хранилище ожидаемого ввода по кнопкам
-  const pendingInputs = new Map(); // key: userId, value: { mode: 'search'|'latest', createdAt: number }
 
-  // Основная клавиатура
-  function buildMainKeyboard() {
-    return {
-      keyboard: [
-        [{ text: '🔎 Поиск' }, { text: '🆕 Последние' }],
-        [{ text: '⚙️ Настройки' }, { text: 'ℹ️ Помощь' }, { text: 'Отмена' }],
-      ],
-      resize_keyboard: true,
-      is_persistent: true,
-      input_field_placeholder: 'Введите запрос или используйте клавиатуру',
-    };
-  }
 
   // /start
   bot.command("start", async (ctx) => {
@@ -101,7 +73,7 @@ async function main() {
 
   // Кнопка: Поиск
   bot.hears('🔎 Поиск', async (ctx) => {
-    pendingInputs.set(ctx.from.id, { mode: 'search', createdAt: Date.now() });
+    setPendingInput(ctx.from.id, { mode: 'search', createdAt: Date.now() });
     await ctx.reply('Введите поисковый запрос:', { reply_markup: { force_reply: true } });
   });
 
@@ -142,7 +114,7 @@ async function main() {
 
   // Обработчик текстового ввода после кнопки "Поиск"
   bot.on('message:text', async (ctx, next) => {
-    const state = pendingInputs.get(ctx.from.id);
+    const state = getPendingInput(ctx.from.id);
     if (!state) return next();
 
     if (state.mode === 'search') {
@@ -150,12 +122,12 @@ async function main() {
 
       // Поддержка отмены из клавиатуры во время ожидания ввода
       if (raw.toLowerCase() === 'отмена') {
-        pendingInputs.delete(ctx.from.id);
+        clearPendingInput(ctx.from.id);
         await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
         return;
       }
 
-      pendingInputs.delete(ctx.from.id);
+      clearPendingInput(ctx.from.id);
       let query = raw;
       let k = Math.max(1, Number(getUserSettings(ctx.from.id)?.k) || 1);
       let threshold = getUserSettings(ctx.from.id)?.threshold;
@@ -251,7 +223,7 @@ async function main() {
 
   // Кнопка: Отмена — очистить ожидаемый ввод и показать клавиатуру
   bot.hears('Отмена', async (ctx) => {
-    pendingInputs.delete(ctx.from.id);
+    clearPendingInput(ctx.from.id);
     await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
@@ -316,8 +288,12 @@ async function main() {
     await ctx.reply(adminHelp);
   });
 
-  // Catch‑all: любое сообщение — показать основное меню
+  // Catch‑all: только неизвестные сообщения вне режима ввода — показать основное меню
+  const knownButtons = new Set(['🔎 Поиск', '🆕 Последние', '⚙️ Настройки', 'ℹ️ Помощь', 'Отмена']);
   bot.on('message', async (ctx) => {
+    const txt = ctx.message?.text;
+    if (typeof txt === 'string' && knownButtons.has(txt)) return;
+    if (hasPendingInput(ctx.from.id)) return;
     await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
@@ -325,46 +301,43 @@ async function main() {
   bot.on("callback_query:data", async (ctx) => {
     const userId = ctx.from?.id;
     const data = ctx.callbackQuery?.data || "";
+    const { action, value } = parse(data);
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
     if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
 
     try {
-      if (data.startsWith("set_type:")) {
-        const t = data.split(":")[1];
-        const type = t === "none" ? null : (t === "short" || t === "stream" || t === "video" ? t : null);
+      if (action === ACTIONS.SET_TYPE) {
+        const type = value === "none" ? null : (value === "short" || value === "stream" || value === "video" ? value : null);
         s = updateUserSettings(userId, { type });
         await ctx.answerCallbackQuery({ text: `Тип: ${type || 'не задан'}` });
-      } else if (data.startsWith("set_threshold:")) {
-        const stepStr = data.split(":")[1];
-        const step = parseFloat(stepStr);
+      } else if (action === ACTIONS.SET_THRESHOLD) {
+        const step = parseFloat(value);
         const cur = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
         let next = cur + step;
-        // Ограничим разумные пределы [0.3 .. 1.5]
         next = Math.max(0.3, Math.min(1.5, next));
         s = updateUserSettings(userId, { threshold: next });
         await ctx.answerCallbackQuery({ text: `threshold: ${next.toFixed(2)}` });
-      } else if (data.startsWith("set_k:")) {
-        const deltaStr = data.split(":")[1];
-        const delta = parseInt(deltaStr, 10);
+      } else if (action === ACTIONS.SET_K) {
+        const delta = parseInt(value, 10);
         const maxK = Number(env.SEARCH_MAX_K || 20);
         const cur = Number(s.k || 0) || 1;
         let next = cur + (Number.isFinite(delta) ? delta : 0);
         next = Math.max(1, Math.min(maxK, next));
         s = updateUserSettings(userId, { k: next });
         await ctx.answerCallbackQuery({ text: `k: ${next}/${maxK}` });
-      } else if (data === "toggle:score") {
+      } else if (action === ACTIONS.TOGGLE && value === 'score') {
         s = updateUserSettings(userId, { showScore: !s.showScore });
         await ctx.answerCallbackQuery({ text: s.showScore ? 'Показывать score' : 'Скрывать score' });
-      } else if (data === "reset:all") {
+      } else if (action === ACTIONS.RESET && value === 'all') {
         s = resetUserSettings(userId);
         if (!s.channelId && channels.length) {
           s = updateUserSettings(userId, { channelId: channels[0].id });
           setGlobalChannelId(channels[0].id);
         }
         await ctx.answerCallbackQuery({ text: 'Настройки сброшены' });
-      } else if (data.startsWith("set_channel:")) {
-        const cid = data.split(":")[1];
+      } else if (action === ACTIONS.SET_CHANNEL) {
+        const cid = value;
         if (cid === 'none') {
           const firstId = channels[0]?.id;
           if (firstId) {
@@ -384,7 +357,7 @@ async function main() {
             await ctx.answerCallbackQuery({ text: 'Канал выбран' });
           }
         }
-      } else if (data === "close:settings") {
+      } else if (action === ACTIONS.CLOSE && value === 'settings') {
         await ctx.answerCallbackQuery({ text: 'Закрыто' });
         try { await ctx.editMessageReplyMarkup(); } catch {}
         await ctx.reply(`Готово. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
@@ -401,11 +374,9 @@ async function main() {
         `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
       ].join("\n");
 
-      // Обновляем текст и клавиатуру
       try {
         await ctx.editMessageText(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       } catch {
-        // Если нельзя редактировать (например, старое сообщение) — отправим новое
         await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       }
     } catch (err) {
@@ -437,45 +408,3 @@ main().catch((err) => {
   logger.error({ err: err?.message }, "Фатальная ошибка запуска бота");
   process.exit(1);
 });
-
-
-function buildSettingsKeyboard(s, channels) {
-  const typeRow = [
-    { text: `Shorts${s.type === 'short' ? ' ✅' : ''}`, callback_data: 'set_type:short' },
-    { text: `Stream${s.type === 'stream' ? ' ✅' : ''}`, callback_data: 'set_type:stream' },
-    { text: `Video${s.type === 'video' ? ' ✅' : ''}`, callback_data: 'set_type:video' },
-    { text: `${s.type ? 'Сброс' : '—'}`, callback_data: 'set_type:none' },
-  ];
-
-  const thr = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
-  const thrRow = [
-    { text: 'threshold -0.05', callback_data: 'set_threshold:-0.05' },
-    { text: `threshold ${thr.toFixed(2)}`, callback_data: 'noop' },
-    { text: 'threshold +0.05', callback_data: 'set_threshold:+0.05' },
-  ];
-
-  const maxK = Number(env.SEARCH_MAX_K || 20);
-  const curK = Number(s.k || 0) || 1;
-  const kRow = [
-    { text: 'k -5', callback_data: 'set_k:-5' },
-    { text: `k ${curK}/${maxK}`, callback_data: 'noop' },
-    { text: 'k +5', callback_data: 'set_k:+5' },
-  ];
-
-  const channelRows = [];
-  for (let i = 0; i < channels.length; i += 2) {
-    const a = channels[i];
-    const b = channels[i + 1];
-    const row = [];
-    if (a) row.push({ text: `${s.channelId === a.id ? '✅ ' : ''}${a.title}`, callback_data: `set_channel:${a.id}` });
-    if (b) row.push({ text: `${s.channelId === b.id ? '✅ ' : ''}${b.title}`, callback_data: `set_channel:${b.id}` });
-    if (row.length) channelRows.push(row);
-  }
-
-  const miscRow = [
-    { text: `${s.showScore ? 'Скрыть score' : 'Показывать score'}`, callback_data: 'toggle:score' },
-    { text: 'Сбросить всё', callback_data: 'reset:all' },
-  ];
-
-  return { inline_keyboard: [typeRow, thrRow, kRow, ...channelRows, miscRow, [{ text: 'Закрыть настройки', callback_data: 'close:settings' }]] };
-}

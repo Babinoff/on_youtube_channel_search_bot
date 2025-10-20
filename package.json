@@ -17,7 +17,8 @@
     "channel:stats": "node src/scripts/channel_stats.js",
     "channel:db:list": "node src/scripts/channel_db_list.js",
     "channel:db:delete": "node src/scripts/channel_db_delete.js",
-    "test": "vitest"
+    "test": "vitest",
+    "test:ci": "vitest run"
   },
   "keywords": [],
   "author": "",
