@@ -102,19 +102,11 @@ async function main() {
   // /help
   bot.command("help", async (ctx) => {
     await ctx.reply([
-      "Команды:",
-      "/latest [канал] — показать последние k видео (k из настроек).",
-      "Если канал не указан, используется выбранный в настройках (по умолчанию — первый из списка администратора). Глобальная YOUTUBE_CHANNEL_ID всегда равна текущему выбранному каналу.",
-      "Поддерживает фильтр типа: /latest [канал] | type=short|stream|video",
-      "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
-      "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
-      "По умолчанию используется выбранный в настройках канал (если есть).",
-      "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
-      "Количество результатов (k) настраивается кнопками в ⚙️ Настройках",
-      "Фильтр типа результата: /search <запрос> | type=short|stream|video",
-      "/settings — настроить кнопками: тип выдачи, threshold, k и канал",
-      "/threshold <число> — установить глобальный порог (без перезапуска)",
-      "\nТакже доступна клавиатура: 'Поиск', 'Последние', 'Настройки' и 'Помощь'."
+      "Как пользоваться ботом через клавиатуру:",
+      "• \"🔎 Поиск\" — введите текст запроса; количество результатов (k) берётся из ⚙️ Настроек.",
+      "• \"🆕 Последние\" — показывает последние k видео выбранного канала (канал берётся из ⚙️ Настроек).",
+      "• \"⚙️ Настройки\" — управление типом выдачи (short/stream/video), порогом совпадения (threshold), количеством результатов (k) и выбором канала.",
+      "• \"ℹ️ Помощь\" — выводит эту подсказку и возвращает клавиатуру."
     ].join("\n"), { reply_markup: buildMainKeyboard() });
   });
 
@@ -177,21 +169,21 @@ async function main() {
       pendingInputs.delete(ctx.from.id);
       let query = raw;
       let k = Math.max(1, Number(getUserSettings(ctx.from.id)?.k) || 1);
-       let threshold = getUserSettings(ctx.from.id)?.threshold;
-       if (typeof threshold !== 'number') threshold = parseFloat(threshold) || env.SEARCH_MAX_DISTANCE;
-       let typeFilter = getUserSettings(ctx.from.id)?.type || null;
- 
-       // Поддержка параметров через "|"
-       if (raw.includes('|')) {
-         const parts = raw.split('|').map(p => p.trim()).filter(Boolean);
-         query = (parts.shift() || '').trim();
-         for (const p of parts) {
-           const mT = p.match(/^threshold\s*=\s*([0-9.]+)/i);
-           const mType = p.match(/^type\s*=\s*(short|stream|video)/i);
-           if (mT) threshold = parseFloat(mT[1]);
-           else if (mType) typeFilter = mType[1];
-         }
-       }
+      let threshold = getUserSettings(ctx.from.id)?.threshold;
+      if (typeof threshold !== 'number') threshold = parseFloat(threshold) || env.SEARCH_MAX_DISTANCE;
+      let typeFilter = getUserSettings(ctx.from.id)?.type || null;
+
+      // Поддержка параметров через "|"
+      if (raw.includes('|')) {
+        const parts = raw.split('|').map(p => p.trim()).filter(Boolean);
+        query = (parts.shift() || '').trim();
+        for (const p of parts) {
+          const mT = p.match(/^threshold\s*=\s*([0-9.]+)/i);
+          const mType = p.match(/^type\s*=\s*(short|stream|video)/i);
+          if (mT) threshold = parseFloat(mT[1]);
+          else if (mType) typeFilter = mType[1];
+        }
+      }
 
       if (!query) {
         await ctx.reply('Пустой запрос.');
@@ -199,28 +191,38 @@ async function main() {
         return;
       }
 
+      // Сообщение ожидания и индикатор набора
+      const waitMsg = await ctx.reply('Идёт поиск… Сервер размышляет…');
+      const typingTimer = setInterval(() => {
+        ctx.api.sendChatAction(ctx.chat.id, 'typing').catch(() => {});
+      }, 4500);
+
       try {
         const us = getUserSettings(ctx.from.id);
-        const results = await searchTopK(query, k, { maxDistance: threshold, channelId: us?.channelId });
-        const filtered = typeFilter ? results.filter(r => (r.type || 'video') === typeFilter) : results;
+        const results = await searchTopK(query, k, { maxDistance: threshold, channelId: us?.channelId, type: typeFilter });
 
-        if (!filtered.length) {
-          await ctx.reply('Ничего не найдено.');
+        if (!results.length) {
+          clearInterval(typingTimer);
+          try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ничего не найдено.'); } catch {}
           await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
           return;
         }
 
-        for (const r of filtered) {
+        for (const r of results) {
           const item = us?.showScore ? r : { ...r, score: undefined };
           const text = formatSearchItem(item);
           const parts = splitTextByLimit(text, 3800);
           for (const p of parts) {
             await ctx.reply(p);
-            await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
-          }
-        }
+             await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
+           }
+         }
+        clearInterval(typingTimer);
+        try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Готово.'); } catch {}
         await ctx.reply('Готово. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
       } catch (err) {
+        clearInterval(typingTimer);
+        try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка поиска'); } catch {}
         await ctx.reply(`Ошибка поиска: ${err?.message || err}`);
         await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
       }
@@ -418,8 +420,13 @@ async function main() {
         await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       }
     } catch (err) {
-      await ctx.answerCallbackQuery({ text: 'Ошибка' });
+      try { await ctx.answerCallbackQuery({ text: 'Ошибка' }); } catch {}
     }
+  });
+
+  // Глобальный обработчик ошибок
+  bot.catch((err) => {
+    try { logger.error({ err }, 'BotError'); } catch (e) { console.error('BotError', err); }
   });
 
   // Запуск polling

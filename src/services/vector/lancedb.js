@@ -143,27 +143,48 @@ async function searchTopK(query, k = 5, opts = {}) {
   }
 
   // Совместимость с разными версиями LanceDB: prefer vectorSearch() если доступен
-  const qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
+  let qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
+
+  // Префильтр по типу до поиска
+  const typeFilter = (opts.type === 'short' || opts.type === 'stream' || opts.type === 'video') ? opts.type : null;
+  try {
+    if (typeFilter && typeof qb.where === 'function') {
+      qb = qb.where(`type = '${typeFilter}'`);
+    } else if (typeFilter && typeof qb.filter === 'function') {
+      // Для старых API: использовать filter() + prefilter(true) если доступно
+      qb = qb.filter(`type = '${typeFilter}'`);
+      if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+    }
+  } catch (e) {
+    logger.warn({ err: e?.message, typeFilter }, "Не удалось применить префильтр по типу; продолжу без него");
+  }
+
+  // Берём больше кандидатов, лимитируем в конце
+  const preLimit = Math.max(k, Number(env.SEARCH_MAX_K || 20));
   let res;
   if (typeof qb.toArray === 'function') {
-    res = await qb.limit(k).toArray();
+    res = await qb.limit(preLimit).toArray();
   } else {
-    res = await qb.limit(k).execute();
+    res = await qb.limit(preLimit).execute();
   }
 
   const rows = Array.isArray(res)
     ? res
     : (typeof res?.toArray === "function" ? res.toArray() : []);
 
-  // Пороговая фильтрация по дистанции (score): сохраняем только близкие матчи
+  // Пороговая фильтрация по дистанции (score)
   const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;
-  const filtered = rows.filter((r) => {
+  const rowsTypeFiltered = typeFilter
+    ? rows.filter((r) => (r.type || 'video') === typeFilter)
+    : rows;
+  const rowsDistanceFiltered = rowsTypeFiltered.filter((r) => {
     const d = r._distance ?? r.distance ?? r.score;
     return typeof d === 'number' ? d <= maxDistance : true;
   });
-  const finalRows = filtered.length ? filtered : rows;
 
-  logger.info({ tableName, k, count: finalRows.length, maxDistance }, "Поиск LanceDB завершён");
+  const finalRows = rowsDistanceFiltered.slice(0, k);
+
+  logger.info({ tableName, k, count: finalRows.length, maxDistance, typeFilter }, "Поиск LanceDB завершён (лимит применён в конце)");
   return finalRows.map((r, i) => ({
     index: i + 1,
     id: r.id,

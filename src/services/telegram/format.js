@@ -18,6 +18,48 @@ function splitTextByLimit(text, maxLen = 3800) {
   return chunks;
 }
 
+// --- Нормализация описания по тем же правилам, что и индексация ---
+function escapeRegex(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function stripAdLines(text) {
+  const raw = text || "";
+  const charsCsv = env.INDEX_DESC_AD_LINE_PREFIX_CHARS || "";
+  const chars = charsCsv.split(",").map((c) => c.trim()).filter(Boolean);
+  if (!chars.length) return raw;
+  const re = new RegExp(`^\\s*(?:${chars.map(escapeRegex).join("|")})\\s*`, "i");
+  const lines = raw.split(/\r?\n/);
+  const filtered = lines.filter((ln) => !re.test(ln));
+  return filtered.join("\n");
+}
+function stripAfterPatterns(text) {
+  const raw = text || "";
+  const csv = env.INDEX_DESC_STRIP_AFTER_PATTERNS || "";
+  const pats = csv.split(",").map((p) => p.trim()).filter(Boolean);
+  if (!pats.length) return raw;
+  let cutAt = -1;
+  const lower = raw.toLowerCase();
+  for (const p of pats) {
+    const pos = lower.indexOf(p.toLowerCase());
+    if (pos >= 0) cutAt = cutAt >= 0 ? Math.min(cutAt, pos) : pos;
+  }
+  if (cutAt < 0) return raw;
+  return raw.slice(0, cutAt).trim();
+}
+function cleanText(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
+function truncateByChars(text, maxChars) {
+  const limit = Number(maxChars || env.DESC_MAX_CHARS || 0);
+  if (!limit || limit <= 0) return text || "";
+  const s = String(text || "");
+  return s.length > limit ? s.slice(0, limit) + "…" : s;
+}
+function normalizeDescriptionForLatest(desc) {
+  let s = desc || "";
+  s = stripAdLines(s);
+  s = stripAfterPatterns(s);
+  s = cleanText(s);
+  s = truncateByChars(s, env.DESC_MAX_CHARS);
+  return s;
+}
+
 // Ограничение длины описания для вывода /latest, управляется env.DESC_MAX_CHARS
 function truncateForLatest(text) {
   const max = Number(env.DESC_MAX_CHARS || 0);
@@ -27,8 +69,8 @@ function truncateForLatest(text) {
 
 function formatLatestItem(v) {
   const descRaw = v.description || "";
-  const descCropped = descRaw ? truncateForLatest(descRaw) : "";
-  const desc = descCropped ? `\n${descCropped}` : "";
+  const descClean = descRaw ? normalizeDescriptionForLatest(descRaw) : "";
+  const desc = descClean ? `\n${descClean}` : "";
   const typeLine = v.type ? `\ntype: ${v.type}` : "";
   return `${v.title}\n${v.url}${typeLine}${desc}`;
 }
