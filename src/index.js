@@ -1,10 +1,10 @@
 const { Bot } = require("grammy");
 const { logger } = require("./config/logger");
 const { env, setGlobalChannelId, validateEnv } = require("./config/env");
-const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
-const { searchTopK } = require("./services/vector/lancedb");
+
+const { searchUnified } = require("./services/vector/search");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
-const { toVideoEntity } = require("./services/youtube/video");
+
 const { fetchLatestVideos } = require("./services/youtube/latest");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { getAdminChannels } = require("./services/admin/channels_store");
@@ -65,6 +65,7 @@ async function main() {
   }
 
   const bot = new Bot(token);
+  const defaultMessage = "Можно запускать следующий поиск.";
 
   // Хранилище ожидаемого ввода по кнопкам
   const pendingInputs = new Map(); // key: userId, value: { mode: 'search'|'latest', createdAt: number }
@@ -136,7 +137,7 @@ async function main() {
       for (const p of parts) { await ctx.reply(p); await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0)); }
     }
     // Показать клавиатуру после вывода последних видео
-    await ctx.reply('Готово. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+    await ctx.reply(`Готово. Показано ${videos.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
   });
 
   // Обработчик текстового ввода после кнопки "Поиск"
@@ -150,7 +151,7 @@ async function main() {
       // Поддержка отмены из клавиатуры во время ожидания ввода
       if (raw.toLowerCase() === 'отмена') {
         pendingInputs.delete(ctx.from.id);
-        await ctx.reply('Отменено. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
         return;
       }
 
@@ -175,7 +176,7 @@ async function main() {
 
       if (!query) {
         await ctx.reply('Пустой запрос.');
-        await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
         return;
       }
 
@@ -187,12 +188,12 @@ async function main() {
 
       try {
         const us = getUserSettings(ctx.from.id);
-        const results = await searchTopK(query, k, { maxDistance: threshold, channelId: us?.channelId, type: typeFilter });
+        const results = await searchUnified(query, k, { maxDistance: threshold, channelId: us?.channelId, type: typeFilter });
 
         if (!results.length) {
           clearInterval(typingTimer);
           try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ничего не найдено.'); } catch {}
-          await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+          await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
           return;
         }
 
@@ -207,12 +208,12 @@ async function main() {
          }
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Готово.'); } catch {}
-        await ctx.reply('Готово. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        await ctx.reply(`Готово. Показано ${results.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
       } catch (err) {
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка поиска'); } catch {}
         await ctx.reply(`Ошибка поиска: ${err?.message || err}`);
-        await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
       }
     }
   });
@@ -251,7 +252,7 @@ async function main() {
   // Кнопка: Отмена — очистить ожидаемый ввод и показать клавиатуру
   bot.hears('Отмена', async (ctx) => {
     pendingInputs.delete(ctx.from.id);
-    await ctx.reply('Отменено. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+    await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
   // Админ: список каналов
@@ -317,7 +318,7 @@ async function main() {
 
   // Catch‑all: любое сообщение — показать основное меню
   bot.on('message', async (ctx) => {
-    await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+    await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
   // Обработчик callback кнопок
@@ -386,7 +387,7 @@ async function main() {
       } else if (data === "close:settings") {
         await ctx.answerCallbackQuery({ text: 'Закрыто' });
         try { await ctx.editMessageReplyMarkup(); } catch {}
-        await ctx.reply('Готово. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        await ctx.reply(`Готово. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
         return;
       } else {
         await ctx.answerCallbackQuery();
