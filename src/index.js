@@ -11,6 +11,7 @@ const { ACTIONS, parse } = require("./services/telegram/callbacks");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { setPendingInput, getPendingInput, clearPendingInput, hasPendingInput } = require("./services/telegram/state");
 const { getAdminChannels } = require("./services/admin/channels_store");
+const { applyAdminCommands } = require("./services/admin/router");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Ранняя проверка окружения
@@ -52,6 +53,7 @@ async function main() {
 
   const bot = new Bot(token);
   const defaultMessage = "Можно запускать следующий поиск.";
+  applyAdminCommands(bot);
 
 
 
@@ -270,20 +272,23 @@ async function main() {
 
     const adminHelp = [
       'Админ-команды (запуск служебных скриптов):',
-      '• /lock_status — показать статус блокировок индексации.',
-      '• /lock_force — принудительно снять блокировку индексации.',
-      '• /channel_stats — статистика по каналам (LanceDB).',
+      '• /lock_status [name] — показать статус блокировок.',
+      '• /lock_force [name] [--force] — принудительно снять блокировку.',
+      '• /channel_stats [@handle|channelId] — статистика по каналам (LanceDB).',
+      '• /channel_count [@handle|channelId] — количество видео в канале.',
       '• /channel_db_list — список таблиц в LanceDB.',
-      '• /channel_db_delete <table> — удалить таблицу канала.',
-      '• /check_youtube <handle|channelId> — проверка YouTube API.',
-      '• /index_latest <count> [channel] — индексировать последние N видео.',
-      '• /index_batch — массовая индексация по плейлистам/каналам.',
-      '• /preview_latest <count> [channel] — предпросмотр последних N видео.',
-      '• /search_latest <query> — тест семантического поиска по последнему индексу.',
+      '• /channel_db_delete <@handle|channelId> --yes — удалить таблицу канала.',
+      '• /check_youtube [@handle|channelId] — проверка YouTube API.',
+      '• /index_latest [@handle|channelId] — индексировать последние 10 видео.',
+      '• /index_batch [@handle|channelId] [--limit N] [--stop-on-first-known on|off] — массовая индексация.',
+      '• /preview_latest — предпросмотр последних 10 видео (только .env).',
+      '• /search_latest <query> — тест семантического поиска.',
+      '• /env_check — проверка окружения.',
       '',
-      'Шаблон запуска с флагами (по аналогии с консолью):',
-      '• /index_latest --count=10 --channel=@handle',
-      '• /channel_db_delete --table=videos_@handle',
+      'Примеры:',
+      '• /index_latest @handle',
+      '• /index_batch @handle --limit 100 --stop-on-first-known on',
+      '• /channel_db_delete @handle --yes',
     ].join('\n');
 
     await ctx.reply(adminHelp);
