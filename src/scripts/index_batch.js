@@ -4,7 +4,7 @@ const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
 const { deriveType } = require("../services/youtube/classify");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
-const { embedTexts } = require("../services/embeddings/mistral");
+const { embedTexts } = require("../services/embeddings");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
 
 function cleanText(s) {

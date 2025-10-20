@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
-const { embedTexts } = require("../embeddings/mistral");
+const { embedTexts } = require("../embeddings");
 const { isLocked, waitForUnlock } = require("../concurrency/lock");
 const { readLockInfo } = require("../concurrency/lock");
 
@@ -91,9 +91,7 @@ async function addDocsToChannelTable(channelId, docs) {
 }
 
 async function searchTopK(query, k = 5, opts = {}) {
-  if (!env.MISTRAL_API_KEY) {
-    throw new Error("MISTRAL_API_KEY отсутствует. Заполните .env");
-  }
+  // Эмбеддинги: ошибки и недоступность провайдера будут отражены абстракцией
 
   // Если идёт индексация — подождать немного или сообщить пользователю
   const indexing = await isLocked('indexing');

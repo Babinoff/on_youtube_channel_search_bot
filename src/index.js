@@ -1,6 +1,6 @@
 const { Bot } = require("grammy");
 const { logger } = require("./config/logger");
-const { env, setGlobalChannelId } = require("./config/env");
+const { env, setGlobalChannelId, validateEnv } = require("./config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
 const { searchTopK } = require("./services/vector/lancedb");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
@@ -8,6 +8,13 @@ const { deriveType } = require("./services/youtube/classify");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { getAdminChannels } = require("./services/admin/channels_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Ранняя проверка окружения
+const validation = validateEnv();
+if (!validation.ok) {
+  logger.error("Остановка: ошибки окружения");
+  process.exit(1);
+}
 
 function requireEnvOrWarn(name, ctx) {
   const val = env[name];

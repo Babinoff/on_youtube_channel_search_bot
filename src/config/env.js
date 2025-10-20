@@ -18,6 +18,7 @@ const env = {
   YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID || "",
   YOUTUBE_CHANNELS_ID: process.env.YOUTUBE_CHANNELS_ID || "",
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
+  EMBEDDINGS_PROVIDER_CHAIN: process.env.EMBEDDINGS_PROVIDER_CHAIN || "",
   MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   VECTOR_DB: process.env.VECTOR_DB || "lancedb",
@@ -51,4 +52,64 @@ const env = {
 function setGlobalChannelId(id) {
   env.YOUTUBE_CHANNEL_ID = id || undefined;
 }
-module.exports = { env, setGlobalChannelId };
+
+function validateEnv() {
+  const { logger } = require("./logger");
+  const errors = [];
+  const warnings = [];
+
+  // Required tokens
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    errors.push("TELEGRAM_BOT_TOKEN отсутствует — заполните .env");
+  }
+  if (!env.YOUTUBE_API_KEY) {
+    // YouTube API key is needed for latest/indexing flows; warn if missing
+    warnings.push("YOUTUBE_API_KEY отсутствует — функции YouTube (🆕 Последние, индексация) недоступны");
+  }
+
+  // Search ranges
+  if (!Number.isFinite(env.SEARCH_MAX_K) || env.SEARCH_MAX_K < 1) {
+    errors.push("SEARCH_MAX_K должен быть положительным числом (>= 1)");
+  }
+  if (!Number.isFinite(env.SEARCH_MAX_DISTANCE) || env.SEARCH_MAX_DISTANCE <= 0 || env.SEARCH_MAX_DISTANCE > 2) {
+    warnings.push("SEARCH_MAX_DISTANCE вне типичного диапазона (ожидается 0 < x ≤ 2)");
+  }
+
+  // Messaging rate limits
+  if (!Number.isFinite(env.TELEGRAM_SEND_DELAY_MS) || env.TELEGRAM_SEND_DELAY_MS < 0) {
+    warnings.push("TELEGRAM_SEND_DELAY_MS должен быть неотрицательным числом");
+  }
+
+  // Embeddings provider sanity
+  const provider = String(env.EMBEDDINGS_PROVIDER || "").toLowerCase();
+  const knownProviders = ["xenova", "mistral", "openai", "google"];
+  if (provider && !knownProviders.includes(provider)) {
+    warnings.push(`Неизвестный EMBEDDINGS_PROVIDER: ${env.EMBEDDINGS_PROVIDER} (известные: ${knownProviders.join(", ")})`);
+  }
+  const chainRaw = String(env.EMBEDDINGS_PROVIDER_CHAIN || '').trim();
+  if (chainRaw) {
+    const chain = chainRaw.split(/[\s,|]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const unknown = chain.filter((name) => !knownProviders.includes(name));
+    if (unknown.length) {
+      warnings.push(`EMBEDDINGS_PROVIDER_CHAIN содержит неизвестные провайдеры: ${unknown.join(", ")}`);
+    }
+  }
+  if (provider === "mistral" && !env.MISTRAL_API_KEY) {
+    warnings.push("MISTRAL_API_KEY отсутствует при EMBEDDINGS_PROVIDER=mistral — эмбеддинги могут не работать");
+  }
+  if (provider === "openai" && !env.OPENAI_API_KEY) {
+    warnings.push("OPENAI_API_KEY отсутствует при EMBEDDINGS_PROVIDER=openai — эмбеддинги могут не работать");
+  }
+
+  // LanceDB config
+  if (!env.LANCEDB_DIR) {
+    warnings.push("LANCEDB_DIR не задан — используется ./data/lancedb");
+  }
+
+  // Log summary
+  warnings.forEach((w) => logger.warn(w));
+  errors.forEach((e) => logger.error(e));
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+module.exports = { env, setGlobalChannelId, validateEnv };
