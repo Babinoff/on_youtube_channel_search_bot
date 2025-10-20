@@ -1,5 +1,5 @@
 const { Bot } = require("grammy");
-const { logger } = require("./config/logger");
+const { logger, getLoggerCtx } = require("./config/logger");
 const { env, setGlobalChannelId, validateEnv } = require("./config/env");
 
 const { searchUnified } = require("./services/vector/search");
@@ -85,8 +85,9 @@ async function main() {
     if (!requireEnvOrWarn('YOUTUBE_API_KEY', ctx)) return;
     const us = getUserSettings(ctx.from?.id);
     const adminChannels = await getAdminChannels();
+    const logLatest = getLoggerCtx(ctx, { action: 'latest' });
     if (!adminChannels.length) {
-      logger.warn("Список каналов администратора пуст");
+      logLatest.warn("Список каналов администратора пуст");
       await ctx.reply("Список каналов администратора пуст. Обратитесь к администратору.");
       return;
     }
@@ -104,6 +105,7 @@ async function main() {
     }
     let typeFilter = us.type || null;
     const limitK = Math.max(1, Number(us.k) || 1);
+    logLatest.info({ channelId: inputId, k: limitK, type: typeFilter }, "Запрос последних видео");
     const videos = await fetchLatestVideos({ input: inputId, limit: limitK, type: typeFilter });
     if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
     for (const item of videos.map(v => formatLatestItem(v))) {
@@ -187,6 +189,8 @@ async function main() {
       } catch (err) {
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка поиска'); } catch {}
+        const logSearch = getLoggerCtx(ctx, { action: 'search' });
+        logSearch.error({ err: err?.message || err }, 'Ошибка поиска');
         await ctx.reply(`Ошибка поиска: ${err?.message || err}`);
         await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
       }
@@ -386,13 +390,18 @@ async function main() {
         await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       }
     } catch (err) {
+      const logSettings = getLoggerCtx(ctx, { action: 'settings' });
+      logSettings.error({ err: err?.message || err }, 'Ошибка обработки callback');
       try { await ctx.answerCallbackQuery({ text: 'Ошибка' }); } catch {}
     }
   });
 
   // Глобальный обработчик ошибок
   bot.catch((err) => {
-    try { logger.error({ err }, 'BotError'); } catch (e) { console.error('BotError', err); }
+    try {
+      const log = getLoggerCtx(err?.ctx, { area: 'bot' });
+      log.error({ err }, 'BotError');
+    } catch (e) { console.error('BotError', err); }
   });
 
   // Запуск polling
