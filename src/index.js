@@ -169,15 +169,16 @@ async function main() {
           return;
         }
 
-        for (const r of results) {
-          const item = us?.showScore ? r : { ...r, score: undefined };
+        for (const [i, r] of results.entries()) {
+          const base = { ...r, index: i + 1 };
+          const item = us?.showScore ? base : { ...base, score: undefined };
           const text = formatSearchItem(item);
           const parts = splitTextByLimit(text, 3800);
           for (const p of parts) {
             await ctx.reply(p);
-             await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
-           }
-         }
+            await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
+          }
+        }
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Готово.'); } catch {}
         await ctx.reply(`Готово. Показано ${results.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });

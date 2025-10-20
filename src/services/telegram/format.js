@@ -80,7 +80,7 @@ function formatSearchItem(item) {
   const idxPrefix = typeof item.index === "number" ? `${item.index}. ` : "";
   const title = item.title || "(без названия)";
   const url = item.url || (item.id ? `https://youtu.be/${item.id}` : "");
-  const score = typeof item.score === "number" ? item.score.toFixed(15) : item.score;
+  const score = typeof item.score === "number" ? item.score.toFixed(6) : item.score;
   const desc = (item.description_indexed || "").trim();
 
   let dateStr = null;
