@@ -1,4 +1,5 @@
 const { env } = require("../../config/env");
+const { stripAdLines: stripAdLinesC, stripAfterPatterns: stripAfterPatternsC, cleanText: cleanTextC } = require("../text/normalize");
 
 // Безопасная отправка длинного текста: разбивает на части по лимиту Telegram (~4096)
 function splitTextByLimit(text, maxLen = 3800) {
@@ -53,9 +54,9 @@ function truncateByChars(text, maxChars) {
 }
 function normalizeDescriptionForLatest(desc) {
   let s = desc || "";
-  s = stripAdLines(s);
-  s = stripAfterPatterns(s);
-  s = cleanText(s);
+  s = stripAdLinesC(s);
+  s = stripAfterPatternsC(s);
+  s = cleanTextC(s);
   s = truncateByChars(s, env.DESC_MAX_CHARS);
   return s;
 }

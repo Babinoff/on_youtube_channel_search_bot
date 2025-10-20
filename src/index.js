@@ -4,7 +4,7 @@ const { env, setGlobalChannelId, validateEnv } = require("./config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
 const { searchTopK } = require("./services/vector/lancedb");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
-const { deriveType } = require("./services/youtube/classify");
+const { toVideoEntity } = require("./services/youtube/video");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { getAdminChannels } = require("./services/admin/channels_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,13 +60,7 @@ async function fetchLatestVideos({ input, limit = 10, type = null }) {
   const page = await listUploadsVideos(uploadsId, client);
   const videoIdsAll = (page.items || []).map(i => i.contentDetails?.videoId).filter(Boolean);
   const detailsAll = videoIdsAll.length ? await getVideosDetails(videoIdsAll, client) : [];
-  const mapped = detailsAll.map(v => ({
-    id: v.id,
-    title: v.snippet?.title || "",
-    description: v.snippet?.description || "",
-    url: `https://youtu.be/${v.id}`,
-    type: deriveType(v),
-  }));
+  const mapped = detailsAll.map(v => toVideoEntity(v));
 
   const limitN = Math.max(1, Number(limit) || 1);
   const filtered = type ? mapped.filter(v => (v.type || 'video') === type) : mapped;

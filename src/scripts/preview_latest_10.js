@@ -2,60 +2,9 @@ require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
-const { deriveType } = require("../services/youtube/classify");
+const { normalizeDescription } = require("../services/text/normalize");
+const { toVideoEntity } = require("../services/youtube/video");
 
-// --- Text normalization (exactly mirrors indexing behavior; ONLY uses env) ---
-function cleanText(s) {
-  return String(s || "").replace(/\s+/g, " ").trim();
-}
-function escapeRegex(s) {
-  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function stripAdLines(text) {
-  const raw = text || "";
-  const charsCsv = env.INDEX_DESC_AD_LINE_PREFIX_CHARS || "";
-  const chars = charsCsv.split(",").map((c) => c.trim()).filter(Boolean);
-  if (!chars.length) return raw;
-  // Remove lines that start with any of the prefix chars
-  const re = new RegExp(`^\\s*(?:${chars.map(escapeRegex).join("|")})\\s*`, "i");
-  const lines = raw.split(/\r?\n/);
-  const filtered = lines.filter((ln) => !re.test(ln));
-  return filtered.join("\n");
-}
-function stripAfterPatterns(text) {
-  const raw = text || "";
-  const csv = env.INDEX_DESC_STRIP_AFTER_PATTERNS || "";
-  const pats = csv.split(",").map((p) => p.trim()).filter(Boolean);
-  if (!pats.length) return raw;
-  let cutAt = -1;
-  const lower = raw.toLowerCase();
-  for (const p of pats) {
-    const pos = lower.indexOf(p.toLowerCase());
-    if (pos >= 0) cutAt = cutAt >= 0 ? Math.min(cutAt, pos) : pos;
-  }
-  if (cutAt < 0) return raw;
-  return raw.slice(0, cutAt).trim();
-}
-function truncateByTokens(text, maxTokens) {
-  const limit = Number(maxTokens || env.INDEX_DESC_MAX_TOKENS || 100);
-  if (!limit || limit <= 0) return text || "";
-  const tokens = String(text || "").split(/\s+/);
-  return tokens.slice(0, limit).join(" ");
-}
-function truncateByChars(text, maxChars) {
-  const limit = Number(maxChars || env.DESC_MAX_CHARS || 100);
-  if (!limit || limit <= 0) return text || "";
-  const s = String(text || "");
-  return s.length > limit ? s.slice(0, limit) : s;
-}
-function normalizeDescriptionForIndex(desc) {
-  let s = desc || "";
-  s = stripAdLines(s);
-  s = stripAfterPatterns(s);
-  s = cleanText(s);
-  s = truncateByChars(s, env.DESC_MAX_CHARS);
-  return s;
-}
 function formatDateYYYYMMDD(d) {
   if (!d) return null;
   const dt = new Date(d);
@@ -93,24 +42,19 @@ async function main() {
   const details = videoIds.length ? await getVideosDetails(videoIds, client) : [];
 
   const docsMeta = details.map((v, idx) => {
-    const id = v.id;
-    const title = cleanText(v.snippet?.title || "");
-    const descriptionRaw = cleanText(v.snippet?.description || "");
-    const descriptionIndexed = normalizeDescriptionForIndex(descriptionRaw);
-    const url = `https://youtu.be/${id}`;
-    const publishedAt = v.snippet?.publishedAt || null;
+    const base = toVideoEntity(v);
+    const descriptionIndexed = normalizeDescription(base.description);
     const etag = v.etag || null;
-    const type = deriveType(v);
     return {
-      id,
-      title,
-      description: descriptionRaw,
+      id: base.id,
+      title: base.title,
+      description: base.description,
       description_indexed: descriptionIndexed,
-      url,
+      url: base.url,
       channel_id: channelId,
-      published_at: publishedAt,
+      published_at: base.publishedAt,
       etag,
-      type,
+      type: base.type,
       last_indexed_at: new Date().toISOString(),
       _preview_index: idx + 1,
     };

@@ -6,12 +6,8 @@ const { openLatestTestTable } = require("../services/vector/lancedb");
 
 async function main() {
   try {
-    if (!env.MISTRAL_API_KEY) {
-      logger.error("MISTRAL_API_KEY отсутствует. Заполните .env и повторите.");
-      process.exit(1);
-    }
-
-    const q = process.argv.slice(2).join(" ").trim() || "IFC SQLite Facility management";
+    
+    const q = process.argv.slice(2).join(" ").trim();
     logger.info({ q }, "Запрос поиска");
 
     const [qVec] = await embedTexts([q]);

@@ -2,67 +2,18 @@ require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
-const { deriveType } = require("../services/youtube/classify");
+const { normalizeDescription } = require("../services/text/normalize");
+const { toVideoEntity } = require("../services/youtube/video");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
 const { embedTexts } = require("../services/embeddings");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
 
-function cleanText(s) {
-  return String(s || "").replace(/\s+/g, " ").trim();
-}
 
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
-function stripAdLines(text) {
-  const raw = text || "";
-  const charsCsv = env.INDEX_DESC_AD_LINE_PREFIX_CHARS || "";
-  const chars = charsCsv.split(",").map(s => s.trim()).filter(Boolean);
-  if (!chars.length) return raw;
-  const re = new RegExp(`^\\s*(?:${chars.map(c => escapeRegex(c)).join("|")})\\s*`, "i");
-  const lines = raw.split(/\r?\n/);
-  const filtered = lines.filter(l => !re.test(l));
-  return filtered.join("\n");
-}
 
-function stripAfterPatterns(text) {
-  const raw = text || "";
-  const csv = env.INDEX_DESC_STRIP_AFTER_PATTERNS || "";
-  const patterns = csv.split(",").map(s => s.trim()).filter(Boolean);
-  if (!patterns.length) return raw;
-  let idx = -1;
-  for (const p of patterns) {
-    const pos = raw.toLowerCase().indexOf(p.toLowerCase());
-    if (pos >= 0) {
-      idx = idx >= 0 ? Math.min(idx, pos) : pos;
-    }
-  }
-  if (idx < 0) return raw;
-  return raw.slice(0, idx);
-}
 
-function truncateByTokens(text, maxTokens) {
-  const max = Number(maxTokens) || 0;
-  if (!max || max <= 0) return text || "";
-  return (text || "").split(/\s+/).slice(0, max).join(" ");
-}
 
-function truncateByChars(text, maxChars) {
-  const max = Number(maxChars) || 0;
-  if (!max || max <= 0) return text || "";
-  const s = String(text || "");
-  return s.length > max ? s.slice(0, max) : s;
-}
 
-function normalizeDescriptionForIndex(desc) {
-  let s = desc || "";
-  s = stripAdLines(s);
-  s = stripAfterPatterns(s);
-  s = cleanText(s);
-  s = truncateByChars(s, env.DESC_MAX_CHARS);
-  return s;
-}
 
 function parseLimitArg(defaultLimit = 100) {
   const i = process.argv.findIndex(a => a === "--limit");
@@ -118,10 +69,7 @@ async function main() {
       logger.error("YOUTUBE_API_KEY отсутствует. Заполните .env и повторите.");
       process.exit(1);
     }
-    if (!env.MISTRAL_API_KEY) {
-      logger.error("MISTRAL_API_KEY отсутствует. Заполните .env и повторите.");
-      process.exit(1);
-    }
+    
 
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
@@ -196,29 +144,25 @@ async function main() {
 
     await updateLockMeta('indexing', { stage: 'normalize', total: details.length });
     const docsMeta = details.map(v => {
-      const id = v.id;
-      const title = cleanText(v.snippet?.title || "");
-      const descriptionIndexed = normalizeDescriptionForIndex(cleanText(v.snippet?.description || ""));
-      const url = `https://youtu.be/${id}`;
-      const publishedAt = v.snippet?.publishedAt || null;
+      const base = toVideoEntity(v);
+      const descriptionIndexed = normalizeDescription(base.description);
       const etag = v.etag || null;
-      const type = deriveType(v);
       return {
-        id,
-        title,
+        id: base.id,
+        title: base.title,
         description_indexed: descriptionIndexed,
-        url,
+        url: base.url,
         channel_id: channelId,
-        published_at: publishedAt,
+        published_at: base.publishedAt,
         etag,
-        type,
+        type: base.type,
         last_indexed_at: new Date().toISOString(),
       };
     });
 
     const texts = docsMeta.map(d => `${d.title}\n\n${d.description_indexed}`);
     await updateLockMeta('indexing', { stage: 'embedding', total: texts.length, current: 0 });
-    logger.info({ count: texts.length }, "Запрос эмбеддингов в Mistral");
+    logger.info({ count: texts.length }, "Запрос эмбеддингов");
     const vectors = await embedTexts(texts);
     await updateLockMeta('indexing', { stage: 'embedding', current: texts.length });
     if (!vectors.length) throw new Error("Эмбеддинги не получены");
