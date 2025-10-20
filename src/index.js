@@ -5,6 +5,7 @@ const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploads
 const { searchTopK } = require("./services/vector/lancedb");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
 const { toVideoEntity } = require("./services/youtube/video");
+const { fetchLatestVideos } = require("./services/youtube/latest");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { getAdminChannels } = require("./services/admin/channels_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,21 +52,7 @@ function splitTextByLimit(text, maxLen = 3800) {
 // Удаляю локальный truncateForLatest, он теперь в services/telegram/format
 // function truncateForLatest(...) { /* removed */ }
 
-async function fetchLatestVideos({ input, limit = 10, type = null }) {
-  const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-  const channelId = input ? (input.match(/^UC/) ? input : await resolveChannelId(input, client)) : env.YOUTUBE_CHANNEL_ID;
-  if (!channelId) throw new Error("Не задан канал: добавьте YOUTUBE_CHANNEL_ID в .env или укажите аргумент.");
-
-  const uploadsId = await getUploadsPlaylistId(channelId, client);
-  const page = await listUploadsVideos(uploadsId, client);
-  const videoIdsAll = (page.items || []).map(i => i.contentDetails?.videoId).filter(Boolean);
-  const detailsAll = videoIdsAll.length ? await getVideosDetails(videoIdsAll, client) : [];
-  const mapped = detailsAll.map(v => toVideoEntity(v));
-
-  const limitN = Math.max(1, Number(limit) || 1);
-  const filtered = type ? mapped.filter(v => (v.type || 'video') === type) : mapped;
-  return filtered.slice(0, limitN);
-}
+// fetchLatestVideos moved to services/youtube/latest.js
 
 async function main() {
   const token = env.TELEGRAM_BOT_TOKEN;
