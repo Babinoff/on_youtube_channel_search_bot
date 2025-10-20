@@ -120,20 +120,22 @@ async function searchTopK(query, k = 5, opts = {}) {
     throw new Error("Не удалось получить эмбеддинг запроса");
   }
 
-  // Предпочитаем таблицу канала (батч на 500+ видео), если она существует
+  // Предпочитаем таблицу выбранного канала; если отсутствует — сообщаем об ошибке
   let table;
   let tableName;
-  if (env.YOUTUBE_CHANNEL_ID) {
-    const opened = await openChannelTableIfExists(env.YOUTUBE_CHANNEL_ID);
+  const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
+  if (preferredChannelId) {
+    const opened = await openChannelTableIfExists(preferredChannelId);
     if (opened.table) {
       table = opened.table;
       tableName = opened.tableName;
-      logger.info({ tableName }, "Поиск: использую таблицу канала");
+      logger.info({ tableName, channelId: preferredChannelId }, "Поиск: использую таблицу канала");
     } else {
-      logger.warn({ tableName: opened.tableName }, "Поиск: таблица канала не найдена, паду на тестовую");
+      tableName = opened.tableName;
+      logger.warn({ tableName, channelId: preferredChannelId }, "Поиск: таблица канала отсутствует или недоступна");
+      throw new Error(`Таблица недоступна: ${tableName}. Попросите администратора создать и проиндексировать канал.`);
     }
-  }
-  if (!table) {
+  } else {
     const openedTest = await openLatestTestTable();
     table = openedTest.table;
     tableName = openedTest.tableName;

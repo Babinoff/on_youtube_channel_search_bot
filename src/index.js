@@ -1,11 +1,12 @@
 const { Bot } = require("grammy");
 const { logger } = require("./config/logger");
-const { env } = require("./config/env");
+const { env, setGlobalChannelId } = require("./config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("./services/youtube/client");
 const { searchTopK } = require("./services/vector/lancedb");
 const { formatLatestItem, formatSearchItem } = require("./services/telegram/format");
 const { deriveType } = require("./services/youtube/classify");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
+const { getAdminChannels } = require("./services/admin/channels_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function requireEnvOrWarn(name, ctx) {
@@ -98,14 +99,15 @@ async function main() {
     await ctx.reply([
       "Команды:",
       "/latest [канал] — показать последние 10 видео канала.",
-      "Если канал не указан, используется YOUTUBE_CHANNEL_ID из .env.",
+      "Если канал не указан, используется выбранный в настройках (по умолчанию — первый из списка администратора). Глобальная YOUTUBE_CHANNEL_ID всегда равна текущему выбранному каналу.",
       "Поддерживает фильтр типа: /latest [канал] | type=short|stream|video",
       "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
       "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
+      "По умолчанию используется выбранный в настройках канал (если есть).",
       "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
       "Можно указать количество результатов: /search <запрос> | k=10",
       "Фильтр типа результата: /search <запрос> | type=short|stream|video",
-      "/settings — настроить кнопками: тип выдачи, threshold и k",
+      "/settings — настроить кнопками: тип выдачи, threshold, k и канал",
       "/threshold <число> — установить глобальный порог (без перезапуска)",
       "\nТакже доступна клавиатура: 'Поиск', 'Последние', 'Настройки' и 'Помощь'."
     ].join("\n"), { reply_markup: buildMainKeyboard() });
@@ -119,14 +121,43 @@ async function main() {
 
   // Кнопка: Последние
   bot.hears('🆕 Последние', async (ctx) => {
-    pendingInputs.set(ctx.from.id, { mode: 'latest', createdAt: Date.now() });
-    await ctx.reply('Введите канал (или оставьте пустым):', { reply_markup: { force_reply: true } });
+    // Показываем сразу последние видео для активного канала
+    if (!requireEnvOrWarn('YOUTUBE_API_KEY', ctx)) return;
+    const us = getUserSettings(ctx.from?.id);
+    const adminChannels = await getAdminChannels();
+    if (!adminChannels.length) {
+      logger.warn("Список каналов администратора пуст");
+      await ctx.reply("Список каналов администратора пуст. Обратитесь к администратору.");
+      return;
+    }
+    const allowedIds = adminChannels.map(c => c.id);
+    let inputId = null;
+    if (us.channelId && allowedIds.includes(us.channelId)) {
+      inputId = us.channelId;
+      setGlobalChannelId(inputId);
+    } else {
+      inputId = allowedIds[0];
+      if (!us.channelId || !allowedIds.includes(us.channelId)) {
+        updateUserSettings(ctx.from?.id, { channelId: inputId });
+      }
+      setGlobalChannelId(inputId);
+    }
+    let typeFilter = us.type || null;
+    const videosRaw = await fetchLatestVideos({ input: inputId, limit: 10 });
+    const videos = typeFilter ? videosRaw.filter(v => (v.type || 'video') === typeFilter) : videosRaw;
+    if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
+    for (const item of videos.map(v => formatLatestItem(v))) {
+      const parts = splitTextByLimit(item, 3800);
+      for (const p of parts) { await ctx.reply(p); await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0)); }
+    }
   });
 
   // Кнопка: Настройки
   bot.hears('⚙️ Настройки', async (ctx) => {
     const userId = ctx.from?.id;
-    const s = getUserSettings(userId);
+    let s = getUserSettings(userId);
+    const channels = await getAdminChannels();
+    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
     const text = [
       'Настройки пользователя:',
       `Тип выдачи: ${s.type || 'не задан'}`,
@@ -135,7 +166,7 @@ async function main() {
       `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
       '\nВыберите кнопки ниже, чтобы обновить настройки.',
     ].join('\n');
-    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s) });
+    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
   });
 
   // Кнопка: Помощь
@@ -143,14 +174,15 @@ async function main() {
     await ctx.reply([
       "Команды:",
       "/latest [канал] — показать последние 10 видео канала.",
-      "Если канал не указан, используется YOUTUBE_CHANNEL_ID из .env.",
+      "Если канал не указан, используется выбранный в настройках (по умолчанию — первый из списка администратора). Глобальная YOUTUBE_CHANNEL_ID всегда равна текущему выбранному каналу.",
       "Поддерживает фильтр типа: /latest [канал] | type=short|stream|video",
       "Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...",
       "/search <запрос> — семантический поиск по локальной таблице LanceDB.",
+      "По умолчанию используется выбранный в настройках канал (если есть).",
       "Можно указать порог совпадения: /search <запрос> | threshold=0.75",
       "Можно указать количество результатов: /search <запрос> | k=10",
       "Фильтр типа результата: /search <запрос> | type=short|stream|video",
-      "/settings — настроить кнопками: тип выдачи, threshold и k",
+      "/settings — настроить кнопками: тип выдачи, threshold, k и канал",
       "/threshold <число> — установить глобальный порог (без перезапуска)"
     ].join("\n"), { reply_markup: buildMainKeyboard() });
   });
@@ -179,7 +211,12 @@ async function main() {
         let maxDistance = env.SEARCH_MAX_DISTANCE;
         let topK = Number(env.SEARCH_TOP_K || 5);
         let typeFilter = null;
-        const us = getUserSettings(ctx.from?.id);
+        let us = getUserSettings(ctx.from?.id);
+        const adminChannelsForSearch = await getAdminChannels();
+        if (!us.channelId && adminChannelsForSearch.length) {
+          us = updateUserSettings(ctx.from?.id, { channelId: adminChannelsForSearch[0].id });
+          setGlobalChannelId(adminChannelsForSearch[0].id);
+        }
         for (let i = 1; i < partsExtra.length; i++) {
           const extra = partsExtra[i] && partsExtra[i].trim();
           if (!extra) continue;
@@ -199,7 +236,7 @@ async function main() {
         if (us && typeof us.threshold === 'number' && !/threshold\s*=/.test(raw)) maxDistance = us.threshold;
         if (us && typeof us.k === 'number' && !/k\s*=/.test(raw)) topK = us.k;
         const fetchK = typeFilter ? Math.max(topK * 2, topK + 5) : topK;
-        const resultsRaw = await searchTopK(query, fetchK, { maxDistance });
+        const resultsRaw = await searchTopK(query, fetchK, { maxDistance, channelId: us.channelId || undefined });
         const results = typeFilter ? resultsRaw.filter(r => (r.type || 'video') === typeFilter).slice(0, topK) : resultsRaw;
         if (!results.length) {
           await ctx.reply(`Нет результатов при пороге ${maxDistance}${typeFilter ? ` и типе ${typeFilter}` : ''}. Попробуйте изменить threshold/k/type или другой запрос.`);
@@ -227,10 +264,37 @@ async function main() {
             else if (["video","видео","regular","обычное"].includes(rawType)) typeFilter = "video";
           }
         }
-        const input = channelSpec || env.YOUTUBE_CHANNEL_ID;
         const us = getUserSettings(ctx.from?.id);
+        const adminChannels = await getAdminChannels();
+        if (!adminChannels.length) {
+          logger.warn("Список каналов администратора пуст");
+          await ctx.reply("Список каналов администратора пуст. Обратитесь к администратору.");
+          return;
+        }
+        const allowedIds = adminChannels.map(c => c.id);
+        let inputId = null;
+        if (channelSpec) {
+          const client = createYouTubeClient(env.YOUTUBE_API_KEY);
+          const resolved = /^UC/.test(channelSpec) ? channelSpec : await resolveChannelId(channelSpec, client);
+          if (!allowedIds.includes(resolved)) {
+            logger.warn({ userId: ctx.from?.id, channelSpec, resolved }, "Запрошенный канал не в списке администратора");
+            await ctx.reply("Канал не разрешён администратором. Выберите канал в настройках.");
+            return;
+          }
+          inputId = resolved;
+          setGlobalChannelId(inputId);
+        } else if (us.channelId && allowedIds.includes(us.channelId)) {
+          inputId = us.channelId;
+          setGlobalChannelId(inputId);
+        } else {
+          inputId = allowedIds[0];
+          if (!us.channelId || !allowedIds.includes(us.channelId)) {
+            updateUserSettings(ctx.from?.id, { channelId: inputId });
+          }
+          setGlobalChannelId(inputId);
+        }
         if (typeFilter == null && us.type) typeFilter = us.type;
-        const videosRaw = await fetchLatestVideos({ input, limit: 10 });
+        const videosRaw = await fetchLatestVideos({ input: inputId, limit: 10 });
         const videos = typeFilter ? videosRaw.filter(v => (v.type || 'video') === typeFilter) : videosRaw;
         if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
         for (const item of videos.map(v => formatLatestItem(v))) {
@@ -244,11 +308,46 @@ async function main() {
     }
   });
 
+  // Админ: список каналов
+  bot.command("channels", async (ctx) => {
+    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
+      await ctx.reply('Команда доступна только администратору.');
+      return;
+    }
+    const list = await getAdminChannels();
+    if (!list.length) { await ctx.reply('Список каналов пуст.'); return; }
+    const lines = list.map((c, i) => `• ${c.title}${c.handle ? ` (${c.handle})` : ''} — ${c.id}`);
+    const text = ['Каналы (админ):', ...lines].join('\n');
+    for (const part of splitTextByLimit(text, 3800)) {
+      await ctx.reply(part);
+    }
+  });
+
+  // Админ: добавить канал
+  bot.command("add_channel", async (ctx) => {
+    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
+      await ctx.reply('Команда доступна только администратору.');
+      return;
+    }
+    await ctx.reply('Список каналов управляется через .env (YOUTUBE_CHANNELS_ID). Команда отключена.');
+  });
+
+  // Админ: удалить канал
+  bot.command("remove_channel", async (ctx) => {
+    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
+      await ctx.reply('Команда доступна только администратору.');
+      return;
+    }
+    await ctx.reply('Список каналов управляется через .env (YOUTUBE_CHANNELS_ID). Команда отключена.');
+  });
+
   // Обработчик callback кнопок
   bot.on("callback_query:data", async (ctx) => {
     const userId = ctx.from?.id;
     const data = ctx.callbackQuery?.data || "";
     let s = getUserSettings(userId);
+    const channels = await getAdminChannels();
+    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
 
     try {
       if (data.startsWith("set_type:")) {
@@ -275,7 +374,32 @@ async function main() {
         await ctx.answerCallbackQuery({ text: s.showScore ? 'Показывать score' : 'Скрывать score' });
       } else if (data === "reset:all") {
         s = resetUserSettings(userId);
+        if (!s.channelId && channels.length) {
+          s = updateUserSettings(userId, { channelId: channels[0].id });
+          setGlobalChannelId(channels[0].id);
+        }
         await ctx.answerCallbackQuery({ text: 'Настройки сброшены' });
+      } else if (data.startsWith("set_channel:")) {
+        const cid = data.split(":")[1];
+        if (cid === 'none') {
+          const firstId = channels[0]?.id;
+          if (firstId) {
+            s = updateUserSettings(userId, { channelId: firstId });
+            setGlobalChannelId(firstId);
+            await ctx.answerCallbackQuery({ text: 'Выбран первый канал' });
+          } else {
+            await ctx.answerCallbackQuery({ text: 'Список каналов пуст' });
+          }
+        } else {
+          const allowedIds = channels.map(c => c.id);
+          if (!allowedIds.includes(cid)) {
+            await ctx.answerCallbackQuery({ text: 'Канал не разрешён администратором' });
+          } else {
+            s = updateUserSettings(userId, { channelId: cid });
+            setGlobalChannelId(cid);
+            await ctx.answerCallbackQuery({ text: 'Канал выбран' });
+          }
+        }
       } else {
         await ctx.answerCallbackQuery();
       }
@@ -290,10 +414,10 @@ async function main() {
 
       // Обновляем текст и клавиатуру
       try {
-        await ctx.editMessageText(text, { reply_markup: buildSettingsKeyboard(s) });
+        await ctx.editMessageText(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       } catch {
         // Если нельзя редактировать (например, старое сообщение) — отправим новое
-        await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s) });
+        await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
       }
     } catch (err) {
       await ctx.answerCallbackQuery({ text: 'Ошибка' });
@@ -321,7 +445,7 @@ main().catch((err) => {
 });
 
 
-function buildSettingsKeyboard(s) {
+function buildSettingsKeyboard(s, channels) {
   const typeRow = [
     { text: `Shorts${s.type === 'short' ? ' ✅' : ''}`, callback_data: 'set_type:short' },
     { text: `Stream${s.type === 'stream' ? ' ✅' : ''}`, callback_data: 'set_type:stream' },
@@ -342,10 +466,20 @@ function buildSettingsKeyboard(s) {
     { text: `k=10${s.k === 10 ? ' ✅' : ''}`, callback_data: 'set_k:10' },
   ];
 
+  const channelRows = [];
+  for (let i = 0; i < channels.length; i += 2) {
+    const a = channels[i];
+    const b = channels[i + 1];
+    const row = [];
+    if (a) row.push({ text: `${s.channelId === a.id ? '✅ ' : ''}${a.title}`, callback_data: `set_channel:${a.id}` });
+    if (b) row.push({ text: `${s.channelId === b.id ? '✅ ' : ''}${b.title}`, callback_data: `set_channel:${b.id}` });
+    if (row.length) channelRows.push(row);
+  }
+
   const miscRow = [
     { text: `${s.showScore ? 'Скрыть score' : 'Показывать score'}`, callback_data: 'toggle:score' },
     { text: 'Сбросить всё', callback_data: 'reset:all' },
   ];
 
-  return { inline_keyboard: [typeRow, thrRow, kRow, miscRow] };
+  return { inline_keyboard: [typeRow, thrRow, kRow, ...channelRows, miscRow] };
 }

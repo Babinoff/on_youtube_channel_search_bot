@@ -18,6 +18,7 @@ function defaultSettings() {
     threshold,
     k,
     showScore: true,
+    channelId: null,
   };
 }
 

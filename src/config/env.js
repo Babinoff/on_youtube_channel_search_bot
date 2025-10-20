@@ -15,7 +15,8 @@ const env = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : undefined,
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-  YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID,
+  YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID || "",
+  YOUTUBE_CHANNELS_ID: process.env.YOUTUBE_CHANNELS_ID || "",
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
   MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -45,4 +46,7 @@ const env = {
   require: (name) => requireEnv(name),
 };
 
-module.exports = { env };
+function setGlobalChannelId(id) {
+  env.YOUTUBE_CHANNEL_ID = id || undefined;
+}
+module.exports = { env, setGlobalChannelId };
