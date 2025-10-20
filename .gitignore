@@ -3,3 +3,4 @@ dist/
 .env
 .data/
 data/
+tmp/locks/indexing.lock
