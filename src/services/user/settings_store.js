@@ -12,7 +12,7 @@ function ensureDir() {
 
 function defaultSettings() {
   const threshold = typeof env.SEARCH_MAX_DISTANCE === "number" ? env.SEARCH_MAX_DISTANCE : parseFloat(env.SEARCH_MAX_DISTANCE) || 0.75;
-  const k = Number(env.SEARCH_TOP_K || 5);
+  const k = Number(env.SEARCH_TOP_K || env.SEARCH_MAX_K || 20);
   return {
     type: null, // "short" | "stream" | "video" | null
     threshold,

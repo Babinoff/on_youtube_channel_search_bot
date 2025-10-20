@@ -32,6 +32,8 @@ const env = {
   TELEGRAM_SEND_DELAY_MS: Number(process.env.TELEGRAM_SEND_DELAY_MS || 250),
   // Search defaults
   SEARCH_TOP_K: Number(process.env.SEARCH_TOP_K || 5),
+  // Max cap for adjustable k via settings (default 20)
+  SEARCH_MAX_K: Number(process.env.SEARCH_MAX_K || 20),
   INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boosty,ссылки,links',
   INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
   // Stop uploads pagination when first known videoId encountered (prod=true, dev=false)
