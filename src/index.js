@@ -350,7 +350,7 @@ async function main() {
       } else if (data.startsWith("set_threshold:")) {
         const stepStr = data.split(":")[1];
         const step = parseFloat(stepStr);
-        const cur = typeof s.threshold === 'number' ? s.threshold : parseFloat(s.threshold) || 0.75;
+        const cur = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
         let next = cur + step;
         // Ограничим разумные пределы [0.3 .. 1.5]
         next = Math.max(0.3, Math.min(1.5, next));
@@ -459,7 +459,7 @@ function buildSettingsKeyboard(s, channels) {
     { text: `${s.type ? 'Сброс' : '—'}`, callback_data: 'set_type:none' },
   ];
 
-  const thr = typeof s.threshold === 'number' ? s.threshold : parseFloat(s.threshold) || 0.75;
+  const thr = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
   const thrRow = [
     { text: 'threshold -0.05', callback_data: 'set_threshold:-0.05' },
     { text: `threshold ${thr.toFixed(2)}`, callback_data: 'noop' },
