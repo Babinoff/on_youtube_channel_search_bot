@@ -44,23 +44,26 @@ function splitTextByLimit(text, maxLen = 3800) {
 // Удаляю локальный truncateForLatest, он теперь в services/telegram/format
 // function truncateForLatest(...) { /* removed */ }
 
-async function fetchLatestVideos({ input, limit = 10 }) {
+async function fetchLatestVideos({ input, limit = 10, type = null }) {
   const client = createYouTubeClient(env.YOUTUBE_API_KEY);
   const channelId = input ? (input.match(/^UC/) ? input : await resolveChannelId(input, client)) : env.YOUTUBE_CHANNEL_ID;
   if (!channelId) throw new Error("Не задан канал: добавьте YOUTUBE_CHANNEL_ID в .env или укажите аргумент.");
 
   const uploadsId = await getUploadsPlaylistId(channelId, client);
   const page = await listUploadsVideos(uploadsId, client);
-  const limitN = Math.max(1, Number(limit) || 1);
-  const videoIds = (page.items || []).map(i => i.contentDetails?.videoId).filter(Boolean).slice(0, limitN);
-  const details = videoIds.length ? await getVideosDetails(videoIds, client) : [];
-  return details.map(v => ({
+  const videoIdsAll = (page.items || []).map(i => i.contentDetails?.videoId).filter(Boolean);
+  const detailsAll = videoIdsAll.length ? await getVideosDetails(videoIdsAll, client) : [];
+  const mapped = detailsAll.map(v => ({
     id: v.id,
     title: v.snippet?.title || "",
     description: v.snippet?.description || "",
     url: `https://youtu.be/${v.id}`,
     type: deriveType(v),
   }));
+
+  const limitN = Math.max(1, Number(limit) || 1);
+  const filtered = type ? mapped.filter(v => (v.type || 'video') === type) : mapped;
+  return filtered.slice(0, limitN);
 }
 
 async function main() {
@@ -146,8 +149,7 @@ async function main() {
     }
     let typeFilter = us.type || null;
     const limitK = Math.max(1, Number(us.k) || 1);
-    const videosRaw = await fetchLatestVideos({ input: inputId, limit: limitK });
-    const videos = typeFilter ? videosRaw.filter(v => (v.type || 'video') === typeFilter) : videosRaw;
+    const videos = await fetchLatestVideos({ input: inputId, limit: limitK, type: typeFilter });
     if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
     for (const item of videos.map(v => formatLatestItem(v))) {
       const parts = splitTextByLimit(item, 3800);
@@ -246,19 +248,13 @@ async function main() {
   // Кнопка: Помощь — вывести описание и вернуть клавиатуру
   bot.hears('ℹ️ Помощь', async (ctx) => {
     await ctx.reply([
-      'Команды:',
-      '/latest [канал] — показать последние k видео (k из настроек).',
-      'Если канал не указан, используется выбранный в настройках (по умолчанию — первый из списка администратора). Глобальная YOUTUBE_CHANNEL_ID всегда равна текущему выбранному каналу.',
-      'Поддерживает фильтр типа: /latest [канал] | type=short|stream|video',
-      'Примеры: /latest, /latest @handle, /latest https://youtube.com/channel/UC...',
-      '/search <запрос> — семантический поиск по локальной таблице LanceDB.',
-      'По умолчанию используется выбранный в настройках канал (если есть).',
-      'Можно указать порог совпадения: /search <запрос> | threshold=0.75',
-      'Количество результатов (k) настраивается кнопками в ⚙️ Настройках',
-      'Фильтр типа результата: /search <запрос> | type=short|stream|video',
-      '/settings — настроить кнопками: тип выдачи, threshold, k и канал',
-      '/threshold <число> — установить глобальный порог (без перезапуска)',
-      '\nТакже доступна клавиатура: "Поиск", "Последние", "Настройки" и "Помощь".'
+      'Как пользоваться ботом через клавиатуру:',
+      '• "🔎 Поиск" — введите запрос; количество результатов (k) берётся из ⚙️ Настроек.',
+      '• "🆕 Последние" — показывает последние k видео выбранного канала.',
+      '• "⚙️ Настройки" — настройка типа выдачи, порога (threshold), k и канала.',
+      '• "ℹ️ Помощь" — краткая справка.',
+      '• "Отмена" — сброс ожидаемого ввода.',
+      '\nПодсказка: k настраивается кнопками в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
     ].join('\n'), { reply_markup: buildMainKeyboard() });
   });
 
@@ -299,6 +295,39 @@ async function main() {
       return;
     }
     await ctx.reply('Список каналов управляется через .env (YOUTUBE_CHANNELS_ID). Команда отключена.');
+  });
+
+  // Скрытая команда для администратора: список админ-команд
+  bot.command("admin", async (ctx) => {
+    const isAdmin = env.ADMIN_USER_ID ? String(ctx.from?.id) === String(env.ADMIN_USER_ID) : false;
+    if (!isAdmin) {
+      return; // Ничего не показываем для не-админов
+    }
+
+    const adminHelp = [
+      'Админ-команды (запуск служебных скриптов):',
+      '• /lock_status — показать статус блокировок индексации.',
+      '• /lock_force — принудительно снять блокировку индексации.',
+      '• /channel_stats — статистика по каналам (LanceDB).',
+      '• /channel_db_list — список таблиц в LanceDB.',
+      '• /channel_db_delete <table> — удалить таблицу канала.',
+      '• /check_youtube <handle|channelId> — проверка YouTube API.',
+      '• /index_latest <count> [channel] — индексировать последние N видео.',
+      '• /index_batch — массовая индексация по плейлистам/каналам.',
+      '• /preview_latest <count> [channel] — предпросмотр последних N видео.',
+      '• /search_latest <query> — тест семантического поиска по последнему индексу.',
+      '',
+      'Шаблон запуска с флагами (по аналогии с консолью):',
+      '• /index_latest --count=10 --channel=@handle',
+      '• /channel_db_delete --table=videos_@handle',
+    ].join('\n');
+
+    await ctx.reply(adminHelp);
+  });
+
+  // Catch‑all: любое сообщение — показать основное меню
+  bot.on('message', async (ctx) => {
+    await ctx.reply('Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
   });
 
   // Обработчик callback кнопок
@@ -364,6 +393,11 @@ async function main() {
             await ctx.answerCallbackQuery({ text: 'Канал выбран' });
           }
         }
+      } else if (data === "close:settings") {
+        await ctx.answerCallbackQuery({ text: 'Закрыто' });
+        try { await ctx.editMessageReplyMarkup(); } catch {}
+        await ctx.reply('Готово. Выберите действие на клавиатуре.', { reply_markup: buildMainKeyboard() });
+        return;
       } else {
         await ctx.answerCallbackQuery();
       }
@@ -447,5 +481,5 @@ function buildSettingsKeyboard(s, channels) {
     { text: 'Сбросить всё', callback_data: 'reset:all' },
   ];
 
-  return { inline_keyboard: [typeRow, thrRow, kRow, ...channelRows, miscRow] };
+  return { inline_keyboard: [typeRow, thrRow, kRow, ...channelRows, miscRow, [{ text: 'Закрыть настройки', callback_data: 'close:settings' }]] };
 }
