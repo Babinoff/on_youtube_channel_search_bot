@@ -25,15 +25,13 @@ const env = {
   EMBEDDINGS_MAX_CONCURRENCY: Number(process.env.EMBEDDINGS_MAX_CONCURRENCY || 1),
   EMBEDDINGS_CACHE_SIZE: Number(process.env.EMBEDDINGS_CACHE_SIZE || 200),
   SEARCH_MAX_DISTANCE: Number(process.env.SEARCH_MAX_DISTANCE || 0.7),
-  // New limits for descriptions (display and indexing)
-  LATEST_DESC_MAX_CHARS: Number(process.env.LATEST_DESC_MAX_CHARS || 200),
+  // Unified description length limit for both display and indexing
+  DESC_MAX_CHARS: Number(process.env.DESC_MAX_CHARS || 500),
   // Messaging: delay between Telegram messages to avoid rate limits
   TELEGRAM_SEND_DELAY_MS: Number(process.env.TELEGRAM_SEND_DELAY_MS || 250),
   // Search defaults
   SEARCH_TOP_K: Number(process.env.SEARCH_TOP_K || 5),
-  INDEX_DESC_MAX_TOKENS: Number(process.env.INDEX_DESC_MAX_TOKENS || 100),
-  INDEX_DESC_MAX_CHARS: Number(process.env.INDEX_DESC_MAX_CHARS || 100),
-  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'ПОДДЕРЖАТЬ НАС МОЖНО|+++|По вопросам сотрудничества|подписывайтесь|subscribe|донат|donate|patreon|boosty|ссылки|links',
+  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boosty,ссылки,links',
   INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
   // Stop uploads pagination when first known videoId encountered (prod=true, dev=false)
   INDEX_STOP_ON_FIRST_KNOWN: ["1","true","yes","on"].includes(String(process.env.INDEX_STOP_ON_FIRST_KNOWN || "false").toLowerCase()),

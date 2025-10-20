@@ -59,8 +59,7 @@ function normalizeDescriptionForIndex(desc) {
   s = stripAdLines(s);
   s = stripAfterPatterns(s);
   s = cleanText(s);
-  s = truncateByTokens(s, env.INDEX_DESC_MAX_TOKENS);
-  s = truncateByChars(s, env.INDEX_DESC_MAX_CHARS);
+  s = truncateByChars(s, env.DESC_MAX_CHARS);
   return s;
 }
 
@@ -120,15 +119,13 @@ async function main() {
     const docsMeta = details.map(v => {
       const id = v.id;
       const title = cleanText(v.snippet?.title || "");
-      const description = cleanText(v.snippet?.description || "");
-      const descriptionIndexed = normalizeDescriptionForIndex(description);
+      const descriptionIndexed = normalizeDescriptionForIndex(cleanText(v.snippet?.description || ""));
       const url = `https://youtu.be/${id}`;
       const publishedAt = v.snippet?.publishedAt || null;
       const etag = v.etag || null;
       return {
         id,
         title,
-        description,
         description_indexed: descriptionIndexed,
         url,
         channel_id: channelId,
@@ -140,7 +137,7 @@ async function main() {
 
     const texts = docsMeta.map(d => `${d.title}\n\n${d.description_indexed}`);
     await updateLockMeta('indexing', { stage: 'embedding', total: texts.length, current: 0 });
-    logger.info({ count: texts.length, maxTokens: env.INDEX_DESC_MAX_TOKENS, maxChars: env.INDEX_DESC_MAX_CHARS }, "Запрос эмбеддингов в Mistral (усечённые описания)");
+    logger.info({ count: texts.length, maxChars: env.DESC_MAX_CHARS }, "Запрос эмбеддингов в Mistral (усечённые описания)");
     const vectors = await embedTexts(texts);
     await updateLockMeta('indexing', { stage: 'embedding', current: texts.length });
     if (!vectors.length) {

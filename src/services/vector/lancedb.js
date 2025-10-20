@@ -168,8 +168,8 @@ async function searchTopK(query, k = 5, opts = {}) {
     title: r.title || r.snippet?.title || "(без названия)",
     url: r.url || (r.id ? `https://youtu.be/${r.id}` : ""),
     score: r._distance ?? r.score ?? r.distance ?? undefined,
-    description: r.description || r.snippet?.description || "",
     description_indexed: r.description_indexed || "",
+    published_at: r.published_at || r.snippet?.publishedAt || null,
   }));
 }
 

@@ -18,9 +18,9 @@ function splitTextByLimit(text, maxLen = 3800) {
   return chunks;
 }
 
-// Ограничение длины описания для вывода /latest, управляется env.LATEST_DESC_MAX_CHARS
+// Ограничение длины описания для вывода /latest, управляется env.DESC_MAX_CHARS
 function truncateForLatest(text) {
-  const max = Number(env.LATEST_DESC_MAX_CHARS || 0);
+  const max = Number(env.DESC_MAX_CHARS || 0);
   if (!max || max <= 0) return text;
   return text.length > max ? text.slice(0, max) + "…" : text;
 }
@@ -32,10 +32,30 @@ function formatLatestItem(v) {
   return `${v.title}\n${v.url}${desc}`;
 }
 
-function formatSearchItem(r) {
-  const scoreStr = r.score !== undefined ? `\nscore: ${r.score}` : "";
-  const desc = r.description_indexed ? `\n\n${r.description_indexed}` : (r.description ? `\n\n${r.description}` : "");
-  return `${r.index}. ${r.title}\n${r.url}${scoreStr}${desc}`;
+function formatSearchItem(item) {
+  const idxPrefix = typeof item.index === "number" ? `${item.index}. ` : "";
+  const title = item.title || "(без названия)";
+  const url = item.url || (item.id ? `https://youtu.be/${item.id}` : "");
+  const score = typeof item.score === "number" ? item.score.toFixed(15) : item.score;
+  const desc = (item.description_indexed || "").trim();
+
+  let dateStr = null;
+  const rawPublished = item.published_at;
+  if (rawPublished) {
+    const dt = new Date(rawPublished);
+    dateStr = isNaN(dt.getTime()) ? String(rawPublished) : dt.toISOString().split("T")[0];
+  }
+
+  const headerLines = [
+    `${idxPrefix}${title}`,
+    url ? `${url}` : null,
+    typeof score !== "undefined" ? `score: ${score}` : null,
+    dateStr ? `date: ${dateStr}` : null,
+  ].filter(Boolean);
+
+  const body = desc ? `\n${desc}` : "";
+  const text = `${headerLines.join("\n")}${body}`;
+  return splitTextByLimit(text);
 }
 
 module.exports = {
