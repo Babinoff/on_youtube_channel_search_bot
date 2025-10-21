@@ -105,7 +105,7 @@ async function main() {
     }
     let typeFilter = us.type || null;
     const limitK = Math.max(1, Number(us.k) || 1);
-    logLatest.info({ channelId: inputId, k: limitK, type: typeFilter }, "Запрос последних видео");
+    logLatest.info({ channelId: inputId, k: limitK, type: typeFilter }, `Запрос последних видео: channel=${inputId} k=${limitK} type=${typeFilter || 'none'}`);
     const videos = await fetchLatestVideos({ input: inputId, limit: limitK, type: typeFilter });
     if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
     for (const item of videos.map(v => formatLatestItem(v))) {
@@ -164,6 +164,8 @@ async function main() {
 
       try {
         const us = getUserSettings(ctx.from.id);
+        const logSearch = getLoggerCtx(ctx, { action: 'search' });
+        logSearch.info({ query, k, threshold, type: typeFilter, channelId: us?.channelId }, `Запрос поиска: "${query}" | k=${k} threshold=${threshold} type=${typeFilter || 'none'}`);
         const results = await searchUnified(query, k, { maxDistance: threshold, channelId: us?.channelId, type: typeFilter });
 
         if (!results.length) {
@@ -190,7 +192,7 @@ async function main() {
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка поиска'); } catch {}
         const logSearch = getLoggerCtx(ctx, { action: 'search' });
-        logSearch.error({ err: err?.message || err }, 'Ошибка поиска');
+        logSearch.error({ err: err?.message || err }, `Ошибка поиска: "${query}" | k=${k} threshold=${threshold} type=${typeFilter || 'none'}`);
         await ctx.reply(`Ошибка поиска: ${err?.message || err}`);
         await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
       }
@@ -315,11 +317,13 @@ async function main() {
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
     if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
+    const logSettings = getLoggerCtx(ctx, { action: 'settings' });
 
     try {
       if (action === ACTIONS.SET_TYPE) {
         const type = value === "none" ? null : (value === "short" || value === "stream" || value === "video" ? value : null);
         s = updateUserSettings(userId, { type });
+        logSettings.info({ action, value: type }, `Настройки: SET_TYPE -> ${type || 'none'}`);
         await ctx.answerCallbackQuery({ text: `Тип: ${type || 'не задан'}` });
       } else if (action === ACTIONS.SET_THRESHOLD) {
         const step = parseFloat(value);
@@ -327,6 +331,7 @@ async function main() {
         let next = cur + step;
         next = Math.max(0.3, Math.min(1.5, next));
         s = updateUserSettings(userId, { threshold: next });
+        logSettings.info({ action, step, from: cur, to: next }, `Настройки: SET_THRESHOLD -> ${next.toFixed(2)} (step=${step})`);
         await ctx.answerCallbackQuery({ text: `threshold: ${next.toFixed(2)}` });
       } else if (action === ACTIONS.SET_K) {
         const delta = parseInt(value, 10);
@@ -335,9 +340,11 @@ async function main() {
         let next = cur + (Number.isFinite(delta) ? delta : 0);
         next = Math.max(1, Math.min(maxK, next));
         s = updateUserSettings(userId, { k: next });
+        logSettings.info({ action, delta, from: cur, to: next, maxK }, `Настройки: SET_K -> ${next}/${maxK} (delta=${delta})`);
         await ctx.answerCallbackQuery({ text: `k: ${next}/${maxK}` });
       } else if (action === ACTIONS.TOGGLE && value === 'score') {
         s = updateUserSettings(userId, { showScore: !s.showScore });
+        logSettings.info({ action, showScore: s.showScore }, `Настройки: TOGGLE score -> ${s.showScore ? 'on' : 'off'}`);
         await ctx.answerCallbackQuery({ text: s.showScore ? 'Показывать score' : 'Скрывать score' });
       } else if (action === ACTIONS.RESET && value === 'all') {
         s = resetUserSettings(userId);
@@ -345,6 +352,7 @@ async function main() {
           s = updateUserSettings(userId, { channelId: channels[0].id });
           setGlobalChannelId(channels[0].id);
         }
+        logSettings.info({ action }, 'Настройки: RESET all');
         await ctx.answerCallbackQuery({ text: 'Настройки сброшены' });
       } else if (action === ACTIONS.SET_CHANNEL) {
         const cid = value;
@@ -353,6 +361,7 @@ async function main() {
           if (firstId) {
             s = updateUserSettings(userId, { channelId: firstId });
             setGlobalChannelId(firstId);
+            logSettings.info({ action, channelId: firstId }, 'Настройки: SET_CHANNEL -> first');
             await ctx.answerCallbackQuery({ text: 'Выбран первый канал' });
           } else {
             await ctx.answerCallbackQuery({ text: 'Список каналов пуст' });
@@ -360,14 +369,17 @@ async function main() {
         } else {
           const allowedIds = channels.map(c => c.id);
           if (!allowedIds.includes(cid)) {
+            logSettings.info({ action, attempted: cid }, 'Настройки: SET_CHANNEL -> not allowed');
             await ctx.answerCallbackQuery({ text: 'Канал не разрешён администратором' });
           } else {
             s = updateUserSettings(userId, { channelId: cid });
             setGlobalChannelId(cid);
+            logSettings.info({ action, channelId: cid }, 'Настройки: SET_CHANNEL -> selected');
             await ctx.answerCallbackQuery({ text: 'Канал выбран' });
           }
         }
       } else if (action === ACTIONS.CLOSE && value === 'settings') {
+        logSettings.info({ action }, 'Настройки: CLOSE settings');
         await ctx.answerCallbackQuery({ text: 'Закрыто' });
         try { await ctx.editMessageReplyMarkup(); } catch {}
         await ctx.reply(`Готово. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
