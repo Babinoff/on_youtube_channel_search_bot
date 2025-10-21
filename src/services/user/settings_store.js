@@ -12,13 +12,9 @@ function ensureDir() {
 
 function normalizeSettings(input) {
   const maxK = Number(env.SEARCH_MAX_K || 20);
-  const defaultThreshold = env.SEARCH_MAX_DISTANCE;
 
   const tRaw = input.type;
   const type = (tRaw === 'short' || tRaw === 'stream' || tRaw === 'video') ? tRaw : null;
-
-  let threshold = typeof input.threshold === 'number' ? input.threshold : parseFloat(input.threshold);
-  if (!Number.isFinite(threshold)) threshold = defaultThreshold;
 
   let kNum = Number(input.k);
   if (!Number.isFinite(kNum) || kNum < 1) kNum = 1;
@@ -29,7 +25,6 @@ function normalizeSettings(input) {
 
   return {
     type,
-    threshold,
     k: kNum,
     showScore,
     channelId,
@@ -39,7 +34,6 @@ function normalizeSettings(input) {
 function defaultSettings() {
   const base = {
     type: null, // "short" | "stream" | "video" | null
-    threshold: env.SEARCH_MAX_DISTANCE,
     k: Number(env.SEARCH_TOP_K || env.SEARCH_MAX_K || 20),
     showScore: true,
     channelId: null,

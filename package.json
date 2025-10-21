@@ -17,7 +17,6 @@
     "channel:stats": "node src/scripts/channel_stats.js",
     "channel:db:list": "node src/scripts/channel_db_list.js",
     "channel:db:delete": "node src/scripts/channel_db_delete.js",
-    "test": "vitest",
     "test:ci": "vitest run"
   },
   "keywords": [],
@@ -25,6 +24,7 @@
   "license": "MIT",
   "dependencies": {
     "@lancedb/lancedb": "^0.22.2",
+    "@xenova/transformers": "^2.17.2",
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
     "grammy": "^1.38.3",

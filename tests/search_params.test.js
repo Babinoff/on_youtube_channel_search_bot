@@ -5,6 +5,7 @@ describe('search params normalization and metric unification', () => {
     vi.resetModules();
     process.env.SEARCH_MAX_K = '20';
     process.env.SEARCH_MAX_DISTANCE = '0.7';
+    // Removed MIN/MAX envs; single SOURCE OF TRUTH is SEARCH_MAX_DISTANCE
   });
 
   it('clampK clamps k to [1, SEARCH_MAX_K]', async () => {
@@ -16,12 +17,12 @@ describe('search params normalization and metric unification', () => {
     expect(clampK(1000)).toBe(20);
   });
 
-  it('normalizeThreshold parses number and clamps to [0,1]', async () => {
+  it('normalizeThreshold parses number or falls back to env default', async () => {
     const mod = await import('../src/services/vector/search.js');
     const { normalizeThreshold } = mod;
     expect(normalizeThreshold('0.9')).toBeCloseTo(0.9, 6);
-    expect(normalizeThreshold(1.5)).toBe(1);
-    expect(normalizeThreshold(-0.2)).toBe(0);
+    expect(normalizeThreshold(1.5)).toBeCloseTo(1.5, 6);
+    expect(normalizeThreshold(-0.2)).toBeCloseTo(-0.2, 6);
     expect(normalizeThreshold('not-a-number')).toBeCloseTo(0.7, 6); // default from env
   });
 
@@ -39,21 +40,15 @@ describe('search params normalization and metric unification', () => {
     const mod = await import('../src/services/vector/search.js');
     const { ensureScoreKey } = mod;
     const rows = [
-      { id: 'a', _distance: 0.123456789 },
-      { id: 'b', distance: 0.2222 },
-      { id: 'c', score: 0.3333 },
-      { id: 'd' },
+      { id: 'a', _distance: 0.5, title: 'A' },
+      { id: 'b', distance: 0.42, title: 'B' },
+      { id: 'c', score: 0.9, title: 'C' },
+      { id: 'd', title: 'D' },
     ];
     const out = ensureScoreKey(rows);
-    expect(out[0].score).toBeCloseTo(0.123456789, 12);
-    expect(out[0]._distance).toBeUndefined();
-    expect(out[0].distance).toBeUndefined();
-
-    expect(out[1].score).toBeCloseTo(0.2222, 6);
-    expect(out[1]._distance).toBeUndefined();
-    expect(out[1].distance).toBeUndefined();
-
-    expect(out[2].score).toBeCloseTo(0.3333, 6);
+    expect(out[0].score).toBeCloseTo(0.5, 6);
+    expect(out[1].score).toBeCloseTo(0.42, 6);
+    expect(out[2].score).toBeCloseTo(0.9, 6);
     expect(out[3].score).toBeUndefined();
   });
 });

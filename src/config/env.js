@@ -33,20 +33,19 @@ const env = {
   TELEGRAM_SEND_DELAY_MS: Number(process.env.TELEGRAM_SEND_DELAY_MS || 250),
   // Search defaults
   SEARCH_TOP_K: Number(process.env.SEARCH_TOP_K || 5),
+  // Enable/disable query text normalization before embedding
+  SEARCH_NORMALIZE_QUERY: ["1","true","yes","on"].includes(String(process.env.SEARCH_NORMALIZE_QUERY || "true").toLowerCase()),
   // Max cap for adjustable k via settings (default 20)
   SEARCH_MAX_K: Number(process.env.SEARCH_MAX_K || 20),
-  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boosty,ссылки,links',
+  // Adaptive search (new variables): number of iterations and step size
+  SEARCH_ADAPTIVE_ITERS: Number(process.env.SEARCH_ADAPTIVE_ITERS || 3),
+  SEARCH_ADAPTIVE_STEP: Number(process.env.SEARCH_ADAPTIVE_STEP || 0.1),
+  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boost...',
   INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
   // Stop uploads pagination when first known videoId encountered (prod=true, dev=false)
   INDEX_STOP_ON_FIRST_KNOWN: ["1","true","yes","on"].includes(String(process.env.INDEX_STOP_ON_FIRST_KNOWN || "false").toLowerCase()),
   // Embeddings robustness
-  EMBEDDINGS_BATCH_SIZE: Number(process.env.EMBEDDINGS_BATCH_SIZE || 8),
-  EMBEDDINGS_MAX_ATTEMPTS: Number(process.env.EMBEDDINGS_MAX_ATTEMPTS || 5),
-  EMBEDDINGS_TIMEOUT_MS: Number(process.env.EMBEDDINGS_TIMEOUT_MS || 30000),
-  // LanceDB insert robustness
-  LANCEDB_INSERT_BATCH_SIZE: Number(process.env.LANCEDB_INSERT_BATCH_SIZE || 50),
-  LANCEDB_INSERT_MAX_ATTEMPTS: Number(process.env.LANCEDB_INSERT_MAX_ATTEMPTS || 3),
-  require: (name) => requireEnv(name),
+  EMBEDDINGS_FALLBACK_ON_ERROR: ["1","true","yes","on"].includes(String(process.env.EMBEDDINGS_FALLBACK_ON_ERROR || "true").toLowerCase()),
 };
 
 function setGlobalChannelId(id) {
@@ -94,22 +93,9 @@ function validateEnv() {
       warnings.push(`EMBEDDINGS_PROVIDER_CHAIN содержит неизвестные провайдеры: ${unknown.join(", ")}`);
     }
   }
-  if (provider === "mistral" && !env.MISTRAL_API_KEY) {
-    warnings.push("MISTRAL_API_KEY отсутствует при EMBEDDINGS_PROVIDER=mistral — эмбеддинги могут не работать");
-  }
-  if (provider === "openai" && !env.OPENAI_API_KEY) {
-    warnings.push("OPENAI_API_KEY отсутствует при EMBEDDINGS_PROVIDER=openai — эмбеддинги могут не работать");
-  }
 
-  // LanceDB config
-  if (!env.LANCEDB_DIR) {
-    warnings.push("LANCEDB_DIR не задан — используется ./data/lancedb");
-  }
-
-  // Log summary
-  warnings.forEach((w) => logger.warn(w));
-  errors.forEach((e) => logger.error(e));
-
-  return { ok: errors.length === 0, errors, warnings };
+  const ok = errors.length === 0;
+  return { ok, errors, warnings };
 }
-module.exports = { env, setGlobalChannelId, validateEnv };
+
+module.exports = { env, validateEnv, requireEnv, setGlobalChannelId };

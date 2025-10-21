@@ -29,15 +29,27 @@ function loadProvider(name) {
 }
 
 function isRetryableError(err) {
-  const msg = String(err?.message || "").toLowerCase();
-  const code = err?.response?.status || err?.statusCode || null;
-  if (code && [429, 500, 502, 503, 504].includes(Number(code))) return true;
-  if (msg.includes("capacity") || msg.includes("quota") || msg.includes("overloaded")) return true;
-  return false;
+  const msg = err?.response?.data || err?.message || String(err);
+  return /timeout|temporarily|rate limit|429|503|network/i.test(msg);
 }
 
 function okVectors(vectors, expectedCount) {
   return Array.isArray(vectors) && vectors.length === expectedCount && vectors.every((v) => Array.isArray(v));
+}
+
+// Provider meta: metric type and max distance bound
+const providerMeta = {
+  xenova: { metric: 'cosine_distance', distanceMax: 2 },
+  mistral: { metric: 'cosine_distance', distanceMax: 2 },
+  openai: { metric: 'cosine_distance', distanceMax: 2 },
+  google: { metric: 'cosine_distance', distanceMax: 2 },
+};
+
+function getProviderDistanceMax(chainInput) {
+  const chain = Array.isArray(chainInput) ? chainInput : resolveProviderChain();
+  const first = (chain && chain[0]) ? chain[0] : String(env.EMBEDDINGS_PROVIDER || '').toLowerCase();
+  const meta = providerMeta[first];
+  return (meta && Number.isFinite(meta.distanceMax)) ? meta.distanceMax : 2;
 }
 
 async function embedTexts(texts) {
@@ -70,4 +82,4 @@ async function embedTexts(texts) {
   throw new Error(`Не удалось получить эмбеддинги. Цепочка провайдеров: ${chain.join(", ")}`);
 }
 
-module.exports = { embedTexts, resolveProviderChain };
+module.exports = { embedTexts, resolveProviderChain, providerMeta, getProviderDistanceMax };

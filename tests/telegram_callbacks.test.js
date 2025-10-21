@@ -12,7 +12,6 @@ describe('telegram callbacks', () => {
 
   it('builders produce consistent callback_data', () => {
     expect(builders.setType('video')).toBe('set_type:video');
-    expect(builders.setThreshold('+0.05')).toBe('set_threshold:+0.05');
     expect(builders.setK('-5')).toBe('set_k:-5');
     expect(builders.setChannel('UC999')).toBe('set_channel:UC999');
     expect(builders.toggleScore()).toBe('toggle:score');

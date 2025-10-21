@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 beforeEach(() => {
   process.env.SEARCH_MAX_K = '20';
   process.env.SEARCH_MAX_DISTANCE = '0.7';
+  // Removed MIN/MAX; only SEARCH_MAX_DISTANCE is authoritative
 });
 
 describe('search normalization + score formatting', () => {
@@ -14,11 +15,11 @@ describe('search normalization + score formatting', () => {
     expect(clampK('not-a-number')).toBe(1);
   });
 
-  it('normalizes threshold to [0,1] and uses env default', async () => {
+  it('normalizes threshold by parsing or using env default', async () => {
     const mod = await import('../src/services/vector/search.js');
     const { normalizeThreshold } = mod;
-    expect(normalizeThreshold(-5)).toBe(0);
-    expect(normalizeThreshold(2.3)).toBe(1);
+    expect(normalizeThreshold(-5)).toBeCloseTo(-5, 6);
+    expect(normalizeThreshold(2.3)).toBeCloseTo(2.3, 6);
     expect(normalizeThreshold('not-a-number')).toBeCloseTo(0.7, 6);
   });
 

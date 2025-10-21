@@ -1,5 +1,6 @@
 const { env } = require('../../config/env');
 const { searchTopK } = require('./lancedb');
+const { normalizeQueryText } = require('../text/query_normalize');
 
 function clampK(k) {
   const maxK = Number(env.SEARCH_MAX_K || 20);
@@ -8,10 +9,9 @@ function clampK(k) {
 }
 
 function normalizeThreshold(threshold) {
+  // Simplified: parse numeric or fall back to env.SEARCH_MAX_DISTANCE
   let t = typeof threshold === 'number' ? threshold : parseFloat(threshold);
   if (!isFinite(t)) t = Number(env.SEARCH_MAX_DISTANCE || 0.7);
-  if (t < 0) t = 0;
-  if (t > 1) t = 1;
   return t;
 }
 
@@ -36,10 +36,12 @@ function ensureScoreKey(rows) {
 
 async function searchUnified(query, k, opts = {}) {
   const kk = clampK(k);
-  const maxDistance = normalizeThreshold(opts.maxDistance ?? opts.threshold);
+  // Use only env.SEARCH_MAX_DISTANCE as the effective threshold
+  const maxDistance = Number(env.SEARCH_MAX_DISTANCE || 0.7);
   const type = normalizeType(opts.type ?? null);
   const channelId = opts.channelId || null;
-  const rows = await searchTopK(query, kk, { maxDistance, channelId, type });
+  const cleanedQuery = env.SEARCH_NORMALIZE_QUERY ? normalizeQueryText(query) : String(query || "");
+  const rows = await searchTopK(cleanedQuery, kk, { maxDistance, channelId, type });
   return ensureScoreKey(rows);
 }
 

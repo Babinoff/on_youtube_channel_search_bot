@@ -9,13 +9,6 @@ function buildSettingsKeyboard(s, channels) {
     { text: `${s.type ? 'Сброс' : '—'}`, callback_data: builders.setType('none') },
   ];
 
-  const thr = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
-  const thrRow = [
-    { text: 'threshold -0.05', callback_data: builders.setThreshold('-0.05') },
-    { text: `threshold ${thr.toFixed(2)}`, callback_data: builders.noop() },
-    { text: 'threshold +0.05', callback_data: builders.setThreshold('+0.05') },
-  ];
-
   const maxK = Number(env.SEARCH_MAX_K || 20);
   const curK = Number(s.k || 0) || 1;
   const kRow = [
@@ -35,11 +28,15 @@ function buildSettingsKeyboard(s, channels) {
   }
 
   const miscRow = [
-    { text: `${s.showScore ? 'Скрыть score' : 'Показывать score'}`, callback_data: builders.toggleScore() },
-    { text: 'Сбросить всё', callback_data: builders.resetAll() },
+    { text: s.showScore ? 'Скрыть score' : 'Показать score', callback_data: builders.toggleScore() },
+    { text: 'Сбросить', callback_data: builders.resetAll() },
   ];
 
-  return { inline_keyboard: [typeRow, thrRow, kRow, ...channelRows, miscRow, [{ text: 'Закрыть настройки', callback_data: builders.closeSettings() }]] };
+  const closeRow = [
+    { text: 'Закрыть настройки', callback_data: builders.closeSettings() },
+  ];
+
+  return { inline_keyboard: [typeRow, kRow, ...channelRows, miscRow, closeRow] };
 }
 
 function buildMainKeyboard() {

@@ -36,20 +36,10 @@ describe('settings_store normalization', () => {
     expect(s.k).toBeLessThanOrEqual(maxK);
   });
 
-  it('coerces threshold to a numeric value (falls back to default)', () => {
-    const defaultThreshold = (typeof env.SEARCH_MAX_DISTANCE === 'number')
-      ? env.SEARCH_MAX_DISTANCE
-      : parseFloat(env.SEARCH_MAX_DISTANCE) || 0.75;
-
-    updateUserSettings(TEST_USER_ID, { threshold: 'not-a-number' });
-    let s = getUserSettings(TEST_USER_ID);
-    expect(typeof s.threshold).toBe('number');
-    // Allow small rounding differences
-    expect(Math.abs(s.threshold - defaultThreshold)).toBeLessThan(1e-6);
-
+  it('ignores threshold value and uses env constant only', () => {
     updateUserSettings(TEST_USER_ID, { threshold: 1.23 });
-    s = getUserSettings(TEST_USER_ID);
-    expect(s.threshold).toBeCloseTo(1.23, 6);
+    const s = getUserSettings(TEST_USER_ID);
+    expect(s.threshold).toBeUndefined();
   });
 
   it('sanitizes type to one of short|stream|video or null', () => {
@@ -85,7 +75,6 @@ describe('settings_store normalization', () => {
   it('defaultSettings are normalized', () => {
     const s = resetUserSettings(TEST_USER_ID);
     const maxK = Number(env.SEARCH_MAX_K || 20);
-    expect(typeof s.threshold).toBe('number');
     expect(s.k).toBeGreaterThanOrEqual(1);
     expect(s.k).toBeLessThanOrEqual(maxK);
     expect([null, 'short', 'stream', 'video']).toContain(s.type);

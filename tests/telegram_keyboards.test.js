@@ -18,7 +18,7 @@ describe('telegram keyboards', () => {
   });
 
   it('buildSettingsKeyboard reflects settings and uses structured callback_data', () => {
-    const s = { type: 'short', threshold: 0.75, k: 7, showScore: true, channelId: 'UC123' };
+    const s = { type: 'short', k: 7, showScore: true, channelId: 'UC123' };
     const channels = [
       { id: 'UC123', title: 'Channel A' },
       { id: 'UC999', title: 'Channel B' },
@@ -29,24 +29,20 @@ describe('telegram keyboards', () => {
     expect(kb).toHaveProperty('inline_keyboard');
     const rows = kb.inline_keyboard;
     const channelRowCount = Math.ceil(channels.length / 2);
-    expect(rows.length).toBe(1 + 1 + 1 + channelRowCount + 1 + 1);
+    expect(rows.length).toBe(1 + 1 + channelRowCount + 1 + 1); // Removed 1 for threshold row
 
     const typeRow = rows[0];
     expect(typeRow[0].text).toContain('Shorts');
     expect(typeRow[0].text).toContain('✅');
     expect(parse(typeRow[0].callback_data).action).toBe(ACTIONS.SET_TYPE);
 
-    const thrRow = rows[1];
-    expect(thrRow[1].text).toBe(`threshold ${s.threshold.toFixed(2)}`);
-    expect(parse(thrRow[0].callback_data)).toEqual({ action: ACTIONS.SET_THRESHOLD, value: '-0.05' });
-    expect(parse(thrRow[2].callback_data)).toEqual({ action: ACTIONS.SET_THRESHOLD, value: '+0.05' });
-
-    const kRow = rows[2];
+    // Adjusted row index for kRow due to threshold row removal
+    const kRow = rows[1];
     expect(kRow[1].text).toBe(`k ${s.k}/${env.SEARCH_MAX_K}`);
     expect(parse(kRow[0].callback_data)).toEqual({ action: ACTIONS.SET_K, value: '-5' });
     expect(parse(kRow[2].callback_data)).toEqual({ action: ACTIONS.SET_K, value: '+5' });
 
-    const firstChannelRow = rows[3];
+    const firstChannelRow = rows[2]; // Adjusted row index
     expect(firstChannelRow[0].text.startsWith('✅ ')).toBe(true);
     expect(firstChannelRow[0].text.endsWith('Channel A')).toBe(true);
     expect(parse(firstChannelRow[0].callback_data)).toEqual({ action: ACTIONS.SET_CHANNEL, value: 'UC123' });
@@ -61,12 +57,6 @@ describe('telegram keyboards', () => {
     expect(parse(closeRow[0].callback_data)).toEqual({ action: ACTIONS.CLOSE, value: 'settings' });
   });
 
-  it('buildSettingsKeyboard falls back to env threshold when non-numeric', () => {
-    const s = { type: null, threshold: 'not-a-number', k: 3, showScore: false, channelId: null };
-    const channels = [];
-    const kb = buildSettingsKeyboard(s, channels);
-    const thrRow = kb.inline_keyboard[1];
-    const fallback = Number(env.SEARCH_MAX_DISTANCE);
-    expect(thrRow[1].text).toBe(`threshold ${fallback.toFixed(2)}`);
-  });
+  // Test case for threshold fallback is no longer needed
+
 });

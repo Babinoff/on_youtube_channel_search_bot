@@ -68,7 +68,7 @@ async function main() {
       "Как пользоваться ботом через клавиатуру:",
       "• \"🔎 Поиск\" — введите текст запроса; количество результатов (k) берётся из ⚙️ Настроек.",
       "• \"🆕 Последние\" — показывает последние k видео выбранного канала (канал берётся из ⚙️ Настроек).",
-      "• \"⚙️ Настройки\" — управление типом выдачи (short/stream/video), порогом совпадения (threshold), количеством результатов (k) и выбором канала.",
+      "• \"⚙️ Настройки\" — управление типом выдачи (short/stream/video), количеством результатов (k) и выбором канала.",
       "• \"ℹ️ Помощь\" — выводит эту подсказку и возвращает клавиатуру."
     ].join("\n"), { reply_markup: buildMainKeyboard() });
   });
@@ -134,8 +134,7 @@ async function main() {
       clearPendingInput(ctx.from.id);
       let query = raw;
       let k = Math.max(1, Number(getUserSettings(ctx.from.id)?.k) || 1);
-      let threshold = getUserSettings(ctx.from.id)?.threshold;
-      if (typeof threshold !== 'number') threshold = parseFloat(threshold) || env.SEARCH_MAX_DISTANCE;
+      const threshold = Number(env.SEARCH_MAX_DISTANCE);
       let typeFilter = getUserSettings(ctx.from.id)?.type || null;
 
       // Поддержка параметров через "|"
@@ -143,10 +142,8 @@ async function main() {
         const parts = raw.split('|').map(p => p.trim()).filter(Boolean);
         query = (parts.shift() || '').trim();
         for (const p of parts) {
-          const mT = p.match(/^threshold\s*=\s*([0-9.]+)/i);
           const mType = p.match(/^type\s*=\s*(short|stream|video)/i);
-          if (mT) threshold = parseFloat(mT[1]);
-          else if (mType) typeFilter = mType[1];
+          if (mType) typeFilter = mType[1];
         }
       }
 
@@ -165,8 +162,8 @@ async function main() {
       try {
         const us = getUserSettings(ctx.from.id);
         const logSearch = getLoggerCtx(ctx, { action: 'search' });
-        logSearch.info({ query, k, threshold, type: typeFilter, channelId: us?.channelId }, `Запрос поиска: "${query}" | k=${k} threshold=${threshold} type=${typeFilter || 'none'}`);
-        const results = await searchUnified(query, k, { maxDistance: threshold, channelId: us?.channelId, type: typeFilter });
+        logSearch.info({ query, k, type: typeFilter, channelId: us?.channelId }, `Запрос поиска: "${query}" | k=${k} type=${typeFilter || 'none'}`);
+        const results = await searchUnified(query, k, { channelId: us?.channelId, type: typeFilter });
 
         if (!results.length) {
           clearInterval(typingTimer);
@@ -192,7 +189,7 @@ async function main() {
         clearInterval(typingTimer);
         try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка поиска'); } catch {}
         const logSearch = getLoggerCtx(ctx, { action: 'search' });
-        logSearch.error({ err: err?.message || err }, `Ошибка поиска: "${query}" | k=${k} threshold=${threshold} type=${typeFilter || 'none'}`);
+        logSearch.error({ err: err?.message || err }, `Ошибка поиска: "${query}" | k=${k} type=${typeFilter || 'none'}`);
         await ctx.reply(`Ошибка поиска: ${err?.message || err}`);
         await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
       }
@@ -209,7 +206,6 @@ async function main() {
     const text = [
       'Настройки пользователя:',
       `Тип выдачи: ${s.type || 'не задан'}`,
-      `threshold: ${typeof s.threshold === 'number' ? s.threshold.toFixed(2) : s.threshold}`,
       `k: ${s.k}`,
       `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
     ].join('\n');
@@ -223,7 +219,7 @@ async function main() {
       'Как пользоваться ботом через клавиатуру:',
       '• "🔎 Поиск" — введите запрос; количество результатов (k) берётся из ⚙️ Настроек.',
       '• "🆕 Последние" — показывает последние k видео выбранного канала.',
-      '• "⚙️ Настройки" — настройка типа выдачи, порога (threshold), k и канала.',
+      '• "⚙️ Настройки" — настройка типа выдачи, k и канала.',
       '• "ℹ️ Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
       '\nПодсказка: k настраивается кнопками в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
@@ -325,14 +321,6 @@ async function main() {
         s = updateUserSettings(userId, { type });
         logSettings.info({ action, value: type }, `Настройки: SET_TYPE -> ${type || 'none'}`);
         await ctx.answerCallbackQuery({ text: `Тип: ${type || 'не задан'}` });
-      } else if (action === ACTIONS.SET_THRESHOLD) {
-        const step = parseFloat(value);
-        const cur = typeof s.threshold === 'number' ? s.threshold : (parseFloat(s.threshold) || env.SEARCH_MAX_DISTANCE);
-        let next = cur + step;
-        next = Math.max(0.3, Math.min(1.5, next));
-        s = updateUserSettings(userId, { threshold: next });
-        logSettings.info({ action, step, from: cur, to: next }, `Настройки: SET_THRESHOLD -> ${next.toFixed(2)} (step=${step})`);
-        await ctx.answerCallbackQuery({ text: `threshold: ${next.toFixed(2)}` });
       } else if (action === ACTIONS.SET_K) {
         const delta = parseInt(value, 10);
         const maxK = Number(env.SEARCH_MAX_K || 20);
@@ -391,7 +379,6 @@ async function main() {
       const text = [
         "Настройки пользователя:",
         `Тип выдачи: ${s.type || 'не задан'}`,
-        `threshold: ${typeof s.threshold === 'number' ? s.threshold.toFixed(2) : s.threshold}`,
         `k: ${s.k}`,
         `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
       ].join("\n");

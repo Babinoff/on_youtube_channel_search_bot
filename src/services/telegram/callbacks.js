@@ -1,6 +1,5 @@
 const ACTIONS = {
   SET_TYPE: 'set_type',
-  SET_THRESHOLD: 'set_threshold',
   SET_K: 'set_k',
   SET_CHANNEL: 'set_channel',
   TOGGLE: 'toggle',
@@ -21,7 +20,6 @@ function parse(data) {
 
 const builders = {
   setType: (type) => build(ACTIONS.SET_TYPE, type),
-  setThreshold: (delta) => build(ACTIONS.SET_THRESHOLD, delta),
   setK: (delta) => build(ACTIONS.SET_K, delta),
   setChannel: (id) => build(ACTIONS.SET_CHANNEL, String(id)),
   toggleScore: () => build(ACTIONS.TOGGLE, 'score'),
