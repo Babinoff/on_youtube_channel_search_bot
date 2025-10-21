@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
-const { embedTexts } = require("../services/embeddings/mistral");
+const { embedTexts } = require("../services/embeddings");
 const { openLatestTestTable } = require("../services/vector/lancedb");
 
 async function main() {
