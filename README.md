@@ -1,115 +1,144 @@
+![license](https://img.shields.io/badge/license-MIT-blue) ![powered_by](https://img.shields.io/badge/powered_by-LanceDB-orange) ![input](https://img.shields.io/badge/input-channelId%20%7C%20%40handle%20%7C%20url-555) ![output](https://img.shields.io/badge/output-LanceDB%20vectors%20%7C%20JSON%20logs-8bc34a) ![etl](https://img.shields.io/badge/ETL_pipeline-ready-brightgreen) ![ci](https://img.shields.io/badge/Ready_for-CI%2FCD_%26_Bots-brightgreen) ![tests](https://img.shields.io/badge/tests-12_files_%7C_35_passing-success) ![pricing](https://img.shields.io/badge/pricing-free-blue)
+
 # YouTube RAG Bot — README
 
-Проект: Telegram‑бот и CLI‑скрипты для индексации YouTube‑видео в локальную векторную базу (LanceDB) и семантического поиска по ним. Скрипты читают канал, чистят описания, получают эмбеддинги (Mistral) и сохраняют документы. Бот отдаёт последние видео и ищет по базе.
+Проект: Telegram‑бот и CLI‑скрипты для индексации YouTube‑видео в локальную векторную базу (LanceDB) и семантического поиска по ним. Скрипты читают канал, чистят описания, получают эмбеддинги (переключаемые провайдеры) и сохраняют документы. Бот отдаёт последние видео и ищет по базе.
 
 ## Быстрый старт
-- Требования: `Node.js LTS`, доступ к YouTube API и Mistral API.
+- Требования: `Node.js LTS`, доступ к YouTube API и провайдеру эмбеддингов.
 - Установка:
   - Скопируйте `.env.example` → `.env` и заполните ключи.
   - Установите зависимости: `npm install`.
+- Проверка окружения: `node src/scripts/env_check.js` — валидирует ключи и диапазоны (`k`, `threshold`) и выводит сводку.
 - Запуск бота (polling): `npm run dev` или `npm start`.
-- Проверка индексации на 10 видео: `npm run index:test -- <channelId|url|@handle>`.
 - Предпросмотр очистки описаний: `npm run preview:index` (берёт канал из `.env`).
+- Индексация на 10 видео: `npm run index:test -- <channelId|url|@handle>`.
 
 ## Переменные окружения
-Обязательные:
+Обязательные ключи:
 - `TELEGRAM_BOT_TOKEN` — токен бота.
-- `YOUTUBE_API_KEY` — ключ YouTube Data API v3.
-- `MISTRAL_API_KEY` — ключ Mistral API (эмбеддинги).
+- `YOUTUBE_API_KEY` — ключ YouTube Data API v3 (для «Последние» и индексации).
 
-Канал:
+Админ‑доступ:
+- `ADMIN_USER_ID` — числовой `userId` администратора Telegram. Только ему доступны команды из раздела «Админ».
+
+Каналы:
+- `YOUTUBE_CHANNEL_ID` — канал по умолчанию для CLI (используют `preview:index`, `index:batch`, `check:youtube`).
 - `YOUTUBE_CHANNELS_ID` — список каналов, доступных пользователям в боте; CSV или `|` (например: `@my,UCabc123|https://youtube.com/@other`).
 
-Ограничения и очистка описаний:
+Эмбеддинги (переключаемый провайдер):
+- `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`. По умолчанию `xenova`.
+- `EMBEDDINGS_PROVIDER_CHAIN` — цепочка фоллбэков через `,` или `|` (например: `mistral,xenova`).
+- `MISTRAL_API_KEY` — ключ Mistral (если `EMBEDDINGS_PROVIDER=mistral`).
+- `OPENAI_API_KEY` — ключ OpenAI (если `EMBEDDINGS_PROVIDER=openai`).
+- Параметры устойчивости: `EMBEDDINGS_MAX_CONCURRENCY` (по умолчанию `1`), `EMBEDDINGS_BATCH_SIZE` (по умолчанию `8`), `EMBEDDINGS_MAX_ATTEMPTS` (по умолчанию `5`), `EMBEDDINGS_TIMEOUT_MS` (по умолчанию `30000`).
+
+Очистка описаний и вывод:
 - `DESC_MAX_CHARS` — единый лимит длины описания для `/latest` и индексации (по умолчанию `500`).
 - `INDEX_DESC_STRIP_AFTER_PATTERNS` — CSV‑список паттернов; если любой встречается в описании, текст обрезается по первому совпадению.
-- `INDEX_DESC_AD_LINE_PREFIX_CHARS` — CSV‑список символов/маркеров; строки, начинающиеся с любого из них, удаляются при предочистке.
+- `INDEX_DESC_AD_LINE_PREFIX_CHARS` — CSV‑список префиксов строк, которые удаляются как рекламные.
 
 Поиск:
-- `SEARCH_MAX_DISTANCE` — порог семантической «дистанции» (меньше — строже), по умолчанию `0.7`.
-- `SEARCH_TOP_K` — количество результатов по умолчанию, по умолчанию `5`.
+- `SEARCH_TOP_K` — количество результатов по умолчанию (по умолчанию `5`).
+- `SEARCH_MAX_K` — верхняя граница для пользовательского `k` (по умолчанию `20`).
+- `SEARCH_MAX_DISTANCE` — максимальный порог дистанции (типично `0 < x ≤ 2`; по умолчанию `0.7`).
 
-Векторная БД (LanceDB) и устойчивость:
+Векторная БД и устойчивость:
 - `VECTOR_DB` — `lancedb` (поддерживается текущей реализацией).
 - `LANCEDB_DIR` — путь к данным LanceDB (по умолчанию `./data/lancedb`).
 - `LANCEDB_INSERT_BATCH_SIZE`, `LANCEDB_INSERT_MAX_ATTEMPTS` — размер чанка и ретраи вставки.
 
-Эмбеддинги:
-- `EMBEDDINGS_BATCH_SIZE`, `EMBEDDINGS_MAX_ATTEMPTS`, `EMBEDDINGS_TIMEOUT_MS` — батчи и ретраи для запроса эмбеддингов.
-
 Прочее:
 - `DATABASE_URL` — путь к SQLite (метаданные).
 - `TELEGRAM_SEND_DELAY_MS` — задержка между сообщениями бота (мс), помогает избежать rate‑limit.
-- `INDEX_STOP_ON_FIRST_KNOWN` — остановить пагинацию на первом известном `videoId` при батч‑индексации (по умолчанию `false` для dev).
+- `INDEX_STOP_ON_FIRST_KNOWN` — остановить пагинацию на первом известном `videoId` при батч‑индексации (`true/false`, по умолчанию `false`).
 
 ## Нормализация описаний
-Для стабильных эмбеддингов и читаемого вывода применяется единая очистка:
+Единая очистка для стабильных эмбеддингов и читаемого вывода:
 1) Удаление рекламных строк по префиксам из `INDEX_DESC_AD_LINE_PREFIX_CHARS`.
 2) Обрезка после первого совпадения из `INDEX_DESC_STRIP_AFTER_PATTERNS`.
 3) Нормализация пробелов и трим.
 4) Усечение по `DESC_MAX_CHARS`.
 
-Эта логика используется в скриптах индексации (`index:test`, `index:batch`) и предпросмотра (`preview:index`), а также при выводе `/latest` в боте.
+Логика используется в скриптах индексации (`index:test`, `index:batch`) и предпросмотра (`preview:index`), а также при выводе `/latest` в боте.
+
+## Команды бота (Telegram)
+- `/latest [канал]` — последние `k` видео канала (по умолчанию `k = SEARCH_TOP_K`).
+  - Примеры: `/latest`, `/latest @handle`, `/latest https://youtube.com/channel/UC...`.
+  - Описание очищается и усекается по `DESC_MAX_CHARS`.
+- `/search <запрос> | threshold=0.75 | k=10 | type=shorts|video` — семантический поиск по LanceDB.
+  - `k` клампится до `SEARCH_MAX_K`; `threshold` нормализуется.
+  - Показ `score` управляется настройкой пользователя (включает/скрывает поле `score`).
+- `/threshold <число>` — обновить глобальный порог поиска.
+- `/admin` — скрытое меню администратора (см. ниже).
+
+## Админ‑команды (через `/admin`)
+Доступны только пользователю с `ADMIN_USER_ID`:
+- `/lock_status` — статус лок‑файла индексации.
+- `/lock_force` — принудительное освобождение лок‑файла.
+- `/channel_db_list` — список таблиц каналов в LanceDB.
+- `/channel_db_delete <channel> --yes` — удалить таблицу канала.
+- `/channel_stats [channel]` — сводная статистика индексации по каналу.
+- `/channel_count [channel]` — количество видео в плейлисте загрузок.
+- `/check_youtube [channel]` — резолв канала, плейлист загрузок, первые `videoId`.
+- `/index_latest [channel]` — тестовая индексация 10 видео.
+- `/index_batch [channel] [--limit N] [--stop-on-first-known on|off]` — батч‑индексация.
+- `/preview_latest` — предпросмотр очистки по `.env`.
+- `/search_latest <query>` — тестовый поиск в тестовой таблице.
+- `/env_check` — сводка и валидация окружения.
 
 ## Скрипты (CLI)
 Все команды запускаются через `npm run <script> -- [аргументы]`.
 
 - `check:youtube` — проверить доступность канала и плейлиста загрузок.
   - Пример: `npm run check:youtube -- <channelId|url|@handle>`.
-  - Результат: резолв канала, плейлист загрузок, список `videoId` первой страницы.
 
 - `preview:index` — предпросмотр очистки описаний и JSON‑документов (без эмбеддингов).
   - Канал берётся из `.env` (`YOUTUBE_CHANNEL_ID`) без аргументов.
-  - Показывает «raw» и «cleaned» описание, а также JSON‑объект, который пойдёт в БД.
 
 - `index:test` — тестовая индексация 10 видео в временную таблицу.
   - Пример: `npm run index:test -- <channelId|url|@handle>`.
-  - Действия: резолв канала → загрузка 10 `videoId` → детали → очистка описаний → эмбеддинги (Mistral) → создание тестовой таблицы LanceDB и вставка.
 
 - `index:batch` — батч‑индексация N видео канала в таблицу канала.
   - Обязательные ключи: `--limit <число>`.
-  - Пример (берёт канал из .env): `npm run index:batch -- --limit 500`.
-  - Пример (с явным каналом): `npm run index:batch -- @handle --limit 500`.
-  - Дополнительно: `--stop-on-first-known false` — продолжать пагинацию, даже если встретился уже индексированный `videoId`.
-  - Поведение: дедупликация по существующей таблице, очистка описаний, эмбеддинги, вставка батчами с ретраями.
-  - Сообщение «Нечего добавлять» означает, что выбранные `videoId` уже есть в таблице.
+  - Примеры: `npm run index:batch -- --limit 500` или `npm run index:batch -- @handle --limit 500`.
+  - Дополнительно: `--stop-on-first-known on|off` — ранняя остановка при встрече известного `videoId`.
 
 - `search:test` — локальный поиск по тестовой таблице.
   - Пример: `npm run search:test -- BIM IFC SQLite`.
-  - Вывод: `title`, `url`, метрика (`score`/`distance`), top‑5 по умолчанию.
+  - Вывод: `title`, `url`, метрика `score`, top‑5 по умолчанию.
 
 - `lock:status` — статус лок‑файла (по умолчанию `indexing`).
-  - Пример: `npm run lock:status` или `npm run lock:status -- indexing`.
-  - Вывод: pid, стадия, прогресс, обновления, «stale».
-
 - `lock:force` — принудительная разблокировка `indexing`.
-  - Просто: `npm run lock:force` (в пакете уже зашито `indexing --force`).
+- `channel:count` — вывести количество видео канала.
+- `channel:stats` — сводка по каналу.
+- `channel:db:list` — список таблиц каналов в LanceDB.
+- `channel:db:delete` — удалить таблицу канала.
+- `node src/scripts/env_check.js` — самопроверка окружения (если удобнее без `npm run`).
 
-- `channel:count` — вывести количество видео в плейлисте загрузок канала.
-  - Пример: `npm run channel:count -- <channelId|url|@handle>`.
-
-## Команды бота (Telegram)
-- `/latest [канал]` — последние 10 видео канала.
-  - Примеры: `/latest`, `/latest @handle`, `/latest https://youtube.com/channel/UC...`.
-  - Описание очищается и усекается по `DESC_MAX_CHARS`.
-- `/search <запрос> | threshold=0.75 | k=10` — семантический поиск по LanceDB.
-  - Можно управлять порогом (`threshold`) и количеством результатов (`k`).
-- `/threshold <число>` — динамически обновить глобальный порог поиска.
+## Формат вывода и поиск
+- Поиск: единая метрика `score` (раньше `_distance|distance`). `score` округляется до 6 знаков; результаты нумеруются.
+- «Последние»: `type`‑фильтр применяется до `slice(0, k)`; описание нормализуется и усекается по `DESC_MAX_CHARS`.
+- Длинные сообщения Telegram режутся функцией `splitTextByLimit` (~3800 символов) без разрывов слов.
 
 ## Примеры
 - Предпросмотр очистки по `.env`: `npm run preview:index`.
 - Тестовая индексация 10 видео: `npm run index:test -- https://youtube.com/@mychannel`.
-- Батч 500 видео без ранней остановки: `npm run index:batch -- @mychannel --limit 500 --stop-on-first-known false`.
+- Батч 500 видео без ранней остановки: `npm run index:batch -- @mychannel --limit 500 --stop-on-first-known off`.
 - Поиск в тестовой таблице: `npm run search:test -- "BIM IFC SQLite"`.
+
+## Тесты и CI
+- Запуск без интерактивного режима: `npm run test:ci --silent`.
+- Набор покрывает нормализацию описаний, параметры поиска, поток «Последние», парсинг админ‑команд и проверку окружения.
 
 ## Частые проблемы
 - Неверная передача аргумента лимита: используйте `--limit 500`, а не `--500`.
 - «Нечего добавлять»: собранные `videoId` уже в таблице — это нормально.
-- Ошибка ключей: заполните `YOUTUBE_API_KEY` и `MISTRAL_API_KEY` в `.env`.
+- Ошибка ключей: заполните `YOUTUBE_API_KEY` и ключ для выбранного `EMBEDDINGS_PROVIDER`.
 - Отображение кириллицы в терминале Windows: установите кодировку UTF‑8:
   - PowerShell: `chcp 65001` и `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`.
 
 ## Замечания
-- Эмбеддинги Mistral платные — индексация больших объёмов требует бюджета.
+- Эмбеддинги облачных провайдеров платные — индексация больших объёмов требует бюджета; включено кэширование и фоллбэки провайдеров.
 - В `.gitignore` исключены `data/` и `.env` — храните ключи локально.
 - Формат очистки описаний полностью управляется `.env` и единообразен в скриптах и боте.
