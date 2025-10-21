@@ -159,16 +159,16 @@ function applyAdminCommands(bot) {
     await replySplit(ctx, text);
   });
 
-  // channel_count [channel]
-  bot.command("channel_count", async (ctx) => {
+  // channel_db_stats [channel]
+  bot.command("channel_db_stats", async (ctx) => {
     if (!(await ensureAdmin(ctx))) return;
-    const args = extractArgs(ctx.message?.text, "channel_count");
-    const log = getLoggerCtx(ctx, { area: "admin", cmd: "channel_count" });
-    log.info({ args }, `Вызов admin-команды: channel_count${args.length ? ' ' + args.join(' ') : ''}`);
+    const args = extractArgs(ctx.message?.text, "channel_db_stats");
+    const log = getLoggerCtx(ctx, { area: "admin", cmd: "channel_db_stats" });
+    log.info({ args }, `Вызов admin-команды: channel_db_stats${args.length ? ' ' + args.join(' ') : ''}`);
     const input = args.find(a => a && !a.startsWith("-"));
-    const res = await runNodeScript("src/scripts/channel_count.js", input ? [input] : [], { timeoutMs: 180_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_count");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_count (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
+    const res = await runNodeScript("src/scripts/channel_db_stats.js", input ? [input] : [], { timeoutMs: 120_000 });
+    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_db_stats");
+    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_db_stats (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
     await replySplit(ctx, text);
   });
 
@@ -245,6 +245,17 @@ function applyAdminCommands(bot) {
     const res = await runNodeScript("src/scripts/env_check.js", [], { timeoutMs: 60_000 });
     if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: env_check");
     const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка env_check (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
+    await replySplit(ctx, text);
+  });
+
+  // emb_status
+  bot.command("emb_status", async (ctx) => {
+    if (!(await ensureAdmin(ctx))) return;
+    const log = getLoggerCtx(ctx, { area: "admin", cmd: "emb_status" });
+    log.info("Вызов admin-команды: emb_status");
+    const res = await runNodeScript("src/scripts/emb_status.js", [], { timeoutMs: 120_000 });
+    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: emb_status");
+    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка emb_status (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
     await replySplit(ctx, text);
   });
 }
