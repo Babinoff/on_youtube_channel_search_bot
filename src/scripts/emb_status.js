@@ -60,7 +60,7 @@ async function testProvider(name, sampleText) {
   }
 }
 
-async function readTableStats() {
+async function readTableStats(channelIdOverride) {
   const out = {};
   // Latest test table
   try {
@@ -68,7 +68,6 @@ async function readTableStats() {
     out.latestTest = { name: latestName || null };
     if (latestName) {
       const { table } = await openLatestTestTable();
-      // Try to count rows via query/select id
       try {
         const qb = table.query().select(["id"]);
         const rows = typeof qb.toArray === 'function' ? await qb.toArray() : await qb.limit(100000000).toArray();
@@ -83,10 +82,10 @@ async function readTableStats() {
 
   // Channel table
   try {
-    const ch = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
-    out.channel = { id: ch };
-    if (ch) {
-      const { table, tableName } = await openChannelTableIfExists(ch);
+    const chRaw = channelIdOverride || env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
+    out.channel = { id: chRaw };
+    if (chRaw) {
+      const { table, tableName } = await openChannelTableIfExists(chRaw);
       out.channel.name = tableName;
       if (!table) {
         out.channel.exists = false;
@@ -108,9 +107,9 @@ async function readTableStats() {
   return out;
 }
 
-async function testSearch(sampleText) {
+async function testSearch(sampleText, channelIdOverride) {
   try {
-    const channelId = env.YOUTUBE_CHANNEL_ID || null;
+    const channelId = channelIdOverride || env.YOUTUBE_CHANNEL_ID || null;
     const providerMax = getProviderDistanceMax();
     const res = await searchTopK(sampleText, 5, { channelId, maxDistance: providerMax });
     const scores = res.map(r => Number(r.score)).filter(n => Number.isFinite(n));
@@ -147,7 +146,23 @@ function printAdaptiveRecommendation(active, stats) {
 async function main() {
   const chain = resolveProviderChain();
   const provider = String(env.EMBEDDINGS_PROVIDER || '').toLowerCase();
-  const sampleText = process.argv.slice(2).join(' ') || 'Аббадон';
+  const argv = process.argv.slice(2);
+  const channelArg = argv.find(a => a && (a.startsWith("@") || /^UC[\w-]{20,}$/.test(a) || /^https?:\/\//.test(a)));
+  const sampleText = argv.filter(a => a !== channelArg).join(' ') || 'Аббадон';
+
+  let activeId = null;
+  try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
+  try { activeId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { activeId = null; }
+  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
+  const raw = channelArg || inputEnv || activeId;
+  let channelId = raw || null;
+  try {
+    if (raw && !/^UC[\w-]{20,}$/.test(raw) && env.YOUTUBE_API_KEY) {
+      const { createYouTubeClient, resolveChannelId } = require("../services/youtube/client");
+      const client = createYouTubeClient(env.YOUTUBE_API_KEY);
+      channelId = await resolveChannelId(raw, client);
+    }
+  } catch (_) {}
 
   console.log("=== Embeddings: окружение ===");
   console.log(`EMBEDDINGS_PROVIDER: ${provider}`);
@@ -157,6 +172,8 @@ async function main() {
   console.log(`SEARCH_ADAPTIVE_ITERS: ${env.SEARCH_ADAPTIVE_ITERS}`);
   console.log(`SEARCH_ADAPTIVE_STEP: ${env.SEARCH_ADAPTIVE_STEP}`);
   console.log(`LANCEDB_DIR: ${env.LANCEDB_DIR || './data/lancedb'}`);
+  console.log(`CHANNEL_SOURCE: ${channelArg ? 'argv' : (inputEnv ? 'env' : (activeId ? 'active' : 'none'))}`);
+  console.log(`CHANNEL_ID: ${channelId || '(не задан)'}`);
 
   console.log("\n=== Провайдеры: статус ===");
   const results = [];
@@ -173,7 +190,7 @@ async function main() {
   console.log(`Активный провайдер: ${active || '(нет)'}`);
 
   console.log("\n=== LanceDB: таблицы ===");
-  const stats = await readTableStats();
+  const stats = await readTableStats(channelId);
   if (stats.latestTest?.error) {
     console.log(`latest10: ERROR ${stats.latestTest.error}`);
   } else if (stats.latestTest?.name) {
@@ -186,11 +203,11 @@ async function main() {
   } else if (stats.channel?.id) {
     console.log(`channel: ${stats.channel.name} | exists=${stats.channel.exists} | rows=${stats.channel.count ?? '?'}`);
   } else {
-    console.log(`channel: не задан (YOUTUBE_CHANNEL_ID)`);
+    console.log(`channel: не задан (активный или .env)`);
   }
 
   console.log("\n=== Поиск: быстрая проверка (порог = максимум провайдера) ===");
-  const s = await testSearch(sampleText);
+  const s = await testSearch(sampleText, channelId);
   if (!s.ok) {
     console.log(`search: ERROR ${s.err}`);
   } else {

@@ -11,11 +11,13 @@ function getDbDir() {
 }
 
 async function resolveInputChannelId(input) {
-  if (env.YOUTUBE_CHANNEL_ID) return env.YOUTUBE_CHANNEL_ID;
-  if (!input) return null;
-  if (!env.YOUTUBE_API_KEY) return input; // best effort
+  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
+  const useArg = Boolean(input);
+  const raw = useArg ? input : inputEnv;
+  if (!raw) return null;
+  if (!env.YOUTUBE_API_KEY) return raw; // best effort
   const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-  return await resolveChannelId(input, client);
+  return await resolveChannelId(raw, client);
 }
 
 async function main() {
@@ -38,7 +40,7 @@ async function main() {
 
     const channelId = await resolveInputChannelId(input);
     if (!channelId) {
-      console.error("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент.");
+      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
       process.exit(1);
     }
 

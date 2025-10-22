@@ -73,7 +73,14 @@ async function main() {
     const typingTimer = setInterval(() => { ctx.api.sendChatAction(ctx.chat.id, 'typing').catch(() => {}); }, 4500);
     try {
       const input = await getActiveChannelId();
-      const items = await fetchLatestVideos({ input, limit: k, type });
+      let items = await fetchLatestVideos({ input, limit: k, type });
+      let note = '';
+      if (!items.length && type) {
+        clearInterval(typingTimer);
+        try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Видео выбранного типа не найдены.'); } catch {}
+        await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
+        return;
+      }
 
       if (!items.length) {
         clearInterval(typingTimer);
@@ -91,7 +98,7 @@ async function main() {
       }
       clearInterval(typingTimer);
       try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Готово.'); } catch {}
-      await ctx.reply(`Готово. Показано ${items.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
+      await ctx.reply(`Готово. Показано ${items.length} видео.${note ? ' ' + note : ''} ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
     } catch (err) {
       clearInterval(typingTimer);
       try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка'); } catch {}
@@ -195,7 +202,7 @@ async function main() {
     const text = [
       'Настройки пользователя:',
       `Тип выдачи: ${s2.type || 'не задан'}`,
-      `k: ${s2.k}`,
+      `Количество видео: ${s2.k}`,
       `score: ${s2.showScore ? 'показывать' : 'скрывать'}`,
     ].join('\n');
   
@@ -208,15 +215,16 @@ async function main() {
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
     const activeId = await getActiveChannelId();
+
     const s2 = { ...s, channelId: activeId };
-  
+
     const text = [
       'Настройки пользователя:',
       `Тип выдачи: ${s2.type || 'не задан'}`,
-      `k: ${s2.k}`,
+      `Количество видео: ${s2.k}`,
       `score: ${s2.showScore ? 'показывать' : 'скрывать'}`,
     ].join('\n');
-  
+
     await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s2, channels, isAdmin) });
   });
 
@@ -224,24 +232,24 @@ async function main() {
   bot.hears('ℹ️ Помощь', async (ctx) => {
     await ctx.reply([
       'Как пользоваться ботом через клавиатуру:',
-      '• "🔎 Поиск" — введите запрос; количество результатов (k) берётся из ⚙️ Настроек.',
-      '• "🆕 Последние" — показывает последние k видео активного канала.',
-      '• "⚙️ Настройки" — настройка типа выдачи и k.',
+      '• "🔎 Поиск" — введите запрос; количество результатов берётся из ⚙️ Настроек.',
+      '• "🆕 Последние" — показывает последние N видео активного канала.',
+      '• "⚙️ Настройки" — настройка типа выдачи и количества видео.',
       '• "ℹ️ Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
-      '\nПодсказка: k настраивается кнопками в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
+      '\nПодсказка: количество видео на выдаче настраивается в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
     ].join('\n'), { reply_markup: buildMainKeyboard() });
   });
   // Дублирующий хендлер без эмодзи
   bot.hears('Помощь', async (ctx) => {
     await ctx.reply([
       'Как пользоваться ботом через клавиатуру:',
-      '• "Поиск" — введите запрос; количество результатов (k) берётся из Настроек.',
-      '• "Последние" — показывает последние k видео активного канала.',
-      '• "Настройки" — настройка типа выдачи и k.',
+      '• "Поиск" — введите запрос; количество результатов берётся из Настроек.',
+      '• "Последние" — показывает последние N видео активного канала.',
+      '• "Настройки" — настройка типа выдачи и количества видео.',
       '• "Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
-      '\nПодсказка: k настраивается кнопками в Настройках; максимум ограничен SEARCH_MAX_K.'
+      '\nПодсказка: количество видео на выдаче настраивается в Настройках; максимум ограничен SEARCH_MAX_K.'
     ].join('\n'), { reply_markup: buildMainKeyboard() });
   });
 
@@ -250,12 +258,6 @@ async function main() {
     clearPendingInput(ctx.from.id);
     await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
   });
-
-
-
-
-
-
 
   // Скрытая команда для администратора: список админ-команд
   bot.command("admin", async (ctx) => {
@@ -285,7 +287,7 @@ async function main() {
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
     const activeId = await getActiveChannelId();
-    const s2 = { ...s, channelId: activeId };
+    let s2 = { ...s, channelId: activeId };
     const logSettings = getLoggerCtx(ctx, { action: 'settings' });
   
     try {
@@ -302,7 +304,7 @@ async function main() {
         next = Math.max(1, Math.min(maxK, next));
         s2 = updateUserSettings(userId, { k: next });
         logSettings.info({ action, delta, from: cur, to: next, maxK }, `Настройки: SET_K -> ${next}/${maxK} (delta=${delta})`);
-        await ctx.answerCallbackQuery({ text: `k: ${next}/${maxK}` });
+        await ctx.answerCallbackQuery({ text: `Количество: ${next}/${maxK}` });
       } else if (action === ACTIONS.TOGGLE && value === 'score') {
         s2 = updateUserSettings(userId, { showScore: !s2.showScore });
         logSettings.info({ action, showScore: s2.showScore }, `Настройки: TOGGLE score -> ${s2.showScore ? 'on' : 'off'}`);
@@ -341,7 +343,7 @@ async function main() {
       const text = [
         "Настройки пользователя:",
         `Тип выдачи: ${finalSettings.type || 'не задан'}`,
-        `k: ${finalSettings.k}`,
+        `Количество видео: ${finalSettings.k}`,
         `score: ${finalSettings.showScore ? 'показывать' : 'скрывать'}`,
       ].join("\n");
   

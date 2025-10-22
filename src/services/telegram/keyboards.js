@@ -12,9 +12,9 @@ function buildSettingsKeyboard(s, channels, isAdmin = false) {
   const maxK = Number(env.SEARCH_MAX_K || 20);
   const curK = Number(s.k || 0) || 1;
   const kRow = [
-    { text: 'k -5', callback_data: builders.setK('-5') },
-    { text: `k ${curK}/${maxK}`, callback_data: builders.noop() },
-    { text: 'k +5', callback_data: builders.setK('+5') },
+    { text: '-5', callback_data: builders.setK('-5') },
+    { text: `Количество ${curK}/${maxK}`, callback_data: builders.noop() },
+    { text: '+5', callback_data: builders.setK('+5') },
   ];
 
   const channelRows = [];

@@ -6,18 +6,19 @@ async function main() {
   try {
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
-    const input = inputEnv || inputArg;
+    const useArg = Boolean(inputArg);
+    const input = useArg ? inputArg : inputEnv;
     if (!env.YOUTUBE_API_KEY) {
       console.error("YOUTUBE_API_KEY отсутствует.");
       process.exit(1);
     }
     if (!input) {
-      console.error("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент.");
+      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
       process.exit(1);
     }
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    const channelId = inputEnv ? inputEnv : await resolveChannelId(input, client);
+    const channelId = await resolveChannelId(input, client);
     const uploadsId = await getUploadsPlaylistId(channelId, client);
 
     let total = 0;
@@ -30,10 +31,8 @@ async function main() {
       if (!token) break;
     }
 
-    // Output only digits
     process.stdout.write(String(total));
   } catch (err) {
-    // On error, print 0 to stdout to keep numeric-only contract
     process.stdout.write("0");
     process.exit(1);
   }

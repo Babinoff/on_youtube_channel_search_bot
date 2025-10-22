@@ -25,7 +25,7 @@ describe('telegram keyboards', () => {
       { id: 'UC777', title: 'Channel C' },
     ];
 
-    const kb = buildSettingsKeyboard(s, channels);
+    const kb = buildSettingsKeyboard(s, channels, true);
     expect(kb).toHaveProperty('inline_keyboard');
     const rows = kb.inline_keyboard;
     const channelRowCount = Math.ceil(channels.length / 2);
@@ -38,7 +38,7 @@ describe('telegram keyboards', () => {
 
     // Adjusted row index for kRow due to threshold row removal
     const kRow = rows[1];
-    expect(kRow[1].text).toBe(`k ${s.k}/${env.SEARCH_MAX_K}`);
+    expect(kRow[1].text).toBe(`Количество ${s.k}/${env.SEARCH_MAX_K}`);
     expect(parse(kRow[0].callback_data)).toEqual({ action: ACTIONS.SET_K, value: '-5' });
     expect(parse(kRow[2].callback_data)).toEqual({ action: ACTIONS.SET_K, value: '+5' });
 

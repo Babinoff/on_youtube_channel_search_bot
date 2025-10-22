@@ -32,13 +32,13 @@ async function main() {
   try {
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
-    const channelId = inputEnv || inputArg;
+    const useArg = Boolean(inputArg);
+    const channelId = useArg ? inputArg : inputEnv;
     if (!channelId) {
-      console.error("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент.");
+      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
       process.exit(1);
     }
 
-    // Без запросов в YouTube: используем как есть
     const tableName = getChannelTableName(channelId);
     const indexed = await countIndexed(channelId);
     const modified = readModified(tableName);

@@ -34,19 +34,15 @@ async function main() {
   try {
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
-    const input = inputEnv || inputArg;
+    const useArg = Boolean(inputArg);
+    const input = useArg ? inputArg : inputEnv;
     if (!input) {
-      console.error("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент.");
+      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
       process.exit(1);
     }
 
-    let channelId;
-    if (inputEnv) {
-      channelId = inputEnv;
-    } else {
-      const client = env.YOUTUBE_API_KEY ? createYouTubeClient(env.YOUTUBE_API_KEY) : null;
-      channelId = client ? await resolveChannelId(input, client) : input;
-    }
+    const client = env.YOUTUBE_API_KEY ? createYouTubeClient(env.YOUTUBE_API_KEY) : null;
+    const channelId = client ? await resolveChannelId(input, client) : input;
 
     const uploads = await countUploads(channelId);
     const indexed = await countIndexed(channelId);
@@ -59,14 +55,11 @@ async function main() {
 
     const tableName = getChannelTableName(channelId);
 
-    // Человекочитаемый вывод
     console.log(`Канал: ${channelId}`);
     console.log(`Таблица: ${tableName} ${indexed.exists ? '(найдена)' : '(не найдена)'}`);
     console.log(`Загружено (YouTube): ${uploadsCount === null ? 'неизвестно' : uploadsCount}`);
     console.log(`Проиндексировано (LanceDB): ${indexedCount}`);
     console.log(`Покрытие: ${coverage === null ? 'n/a' : coverage + '%'}`);
-
-    // Для автоматизации можно добавить вывод JSON по флагу --json (при необходимости)
   } catch (err) {
     console.error("Ошибка получения статистики:", err.message);
     process.exit(1);

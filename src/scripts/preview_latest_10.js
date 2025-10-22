@@ -22,17 +22,20 @@ async function main() {
     process.exit(1);
   }
 
-  // Channel strictly from env (no CLI overrides)
-  const channelId = env.YOUTUBE_CHANNEL_ID
-    || (env.YOUTUBE_CHANNEL_URL || env.YOUTUBE_CHANNEL_HANDLE
-        ? await resolveChannelId(env.YOUTUBE_CHANNEL_URL || env.YOUTUBE_CHANNEL_HANDLE, client)
-        : null);
-  if (!channelId) {
-    logger.error("Не удалось определить канал: задайте YOUTUBE_CHANNEL_ID в .env (или URL/handle)");
+  const inputArg = process.argv[2];
+  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || env.YOUTUBE_CHANNEL_URL || env.YOUTUBE_CHANNEL_HANDLE || null;
+  let activeId = null;
+  try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
+  try { activeId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { activeId = null; }
+  const useArg = Boolean(inputArg);
+  const raw = useArg ? inputArg : (inputEnv || activeId);
+  if (!raw) {
+    logger.error("Не удалось определить канал: укажите аргумент, .env (YOUTUBE_CHANNEL_ID|URL|HANDLE) или установите активный канал.");
     process.exit(1);
   }
+  const channelId = /^UC[\w-]{20,}$/.test(raw) ? raw : await resolveChannelId(raw, client);
 
-  logger.info({ channelId }, "Предпросмотр индексации (только значения из .env)");
+  logger.info({ channelId, source: useArg ? 'argv' : (inputEnv ? 'env' : 'active') }, "Предпросмотр индексации");
 
   const uploadsId = await getUploadsPlaylistId(channelId, client);
   const page1 = await listUploadsVideos(uploadsId, client);
@@ -48,48 +51,15 @@ async function main() {
     return {
       id: base.id,
       title: base.title,
-      description: base.description,
-      description_indexed: descriptionIndexed,
-      url: base.url,
-      channel_id: channelId,
-      published_at: base.publishedAt,
+      descriptionIndexed,
+      publishedAt: base.publishedAt,
+      channelId,
       etag,
-      type: base.type,
-      last_indexed_at: new Date().toISOString(),
-      _preview_index: idx + 1,
+      idx,
     };
   });
 
-  // Human-readable output + exact JSON object to be inserted (sans vector)
-  docsMeta.forEach((d, i) => {
-    const dateStr = formatDateYYYYMMDD(d.published_at) || String(d.published_at || "");
-    const header = `=== [${i + 1}/${docsMeta.length}] ${d.title}`;
-    const meta = `id: ${d.id} | date: ${dateStr} | type: ${d.type} | ${d.url}`;
-    const rawLen = (d.description || "").length;
-    const idxLen = (d.description_indexed || "").length;
-
-    console.log(header);
-    console.log(meta);
-    console.log("description.raw (len=" + rawLen + "):");
-    console.log(d.description || "<empty>");
-    console.log("\n-- cleaned description_indexed (len=" + idxLen + "):");
-    console.log(d.description_indexed || "<empty>");
-    console.log("\nJSON doc to insert (sans vector):");
-    console.log(JSON.stringify({
-      id: d.id,
-      title: d.title,
-      description_indexed: d.description_indexed,
-      url: d.url,
-      channel_id: d.channel_id,
-      published_at: d.published_at,
-      etag: d.etag,
-      type: d.type,
-      last_indexed_at: d.last_indexed_at,
-    }, null, 2));
-    console.log("\n");
-  });
-
-  logger.info({ total: docsMeta.length }, "Предпросмотр завершён — отражает текущие .env настройки один в один");
+  console.log(JSON.stringify({ channelId, count: docsMeta.length, ids: docsMeta.map(d => d.id) }, null, 2));
 }
 
 main().catch((err) => {

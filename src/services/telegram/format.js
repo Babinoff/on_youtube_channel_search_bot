@@ -26,7 +26,7 @@ function stripAdLines(text) {
   const charsCsv = env.INDEX_DESC_AD_LINE_PREFIX_CHARS || "";
   const chars = charsCsv.split(",").map((c) => c.trim()).filter(Boolean);
   if (!chars.length) return raw;
-  const re = new RegExp(`^\\s*(?:${chars.map(escapeRegex).join("|")})\\s*`, "i");
+  const re = new RegExp(`^\s*(?:${chars.map(escapeRegex).join("|")})\s*`, "i");
   const lines = raw.split(/\r?\n/);
   const filtered = lines.filter((ln) => !re.test(ln));
   return filtered.join("\n");
@@ -61,6 +61,43 @@ function normalizeDescriptionForLatest(desc) {
   return s;
 }
 
+// Общий форматтер для поиска и последних
+function formatItem(item, { mode = "latest", includeScore = false, includeIndex = false } = {}) {
+  const idxPrefix = includeIndex && typeof item.index === "number" ? `${item.index}. ` : "";
+  const title = item.title || "(без названия)";
+  const url = item.url || (item.id ? `https://youtu.be/${item.id}` : "");
+
+  let dateStr = null;
+  const rawPublished = item.publishedAt || item.published_at || null;
+  if (rawPublished) {
+    const dt = new Date(rawPublished);
+    dateStr = isNaN(dt.getTime()) ? String(rawPublished) : dt.toISOString().split("T")[0];
+  }
+
+  const typeStr = item.type ? String(item.type) : null;
+  const scoreVal = includeScore ? item.score : undefined;
+  const scoreStr = typeof scoreVal === "number" ? scoreVal.toFixed(6) : scoreVal;
+
+  const headerLines = [
+    `${idxPrefix}${title}`,
+    url ? `${url}` : null,
+    typeof scoreStr !== "undefined" ? `score: ${scoreStr}` : null,
+    dateStr ? `date: ${dateStr}` : null,
+    typeStr ? `type: ${typeStr}` : null,
+  ].filter(Boolean);
+
+  let desc = "";
+  if (mode === "search") {
+    desc = (item.description_indexed || "").trim();
+  } else {
+    const descRaw = item.description || "";
+    const descClean = descRaw ? normalizeDescriptionForLatest(descRaw) : "";
+    desc = descClean;
+  }
+  const body = desc ? `\n${desc}` : "";
+  return `${headerLines.join("\n")}${body}`;
+}
+
 // Ограничение длины описания для вывода /latest, управляется env.DESC_MAX_CHARS
 function truncateForLatest(text) {
   const max = Number(env.DESC_MAX_CHARS || 0);
@@ -69,46 +106,17 @@ function truncateForLatest(text) {
 }
 
 function formatLatestItem(v) {
-  const descRaw = v.description || "";
-  const descClean = descRaw ? normalizeDescriptionForLatest(descRaw) : "";
-  const desc = descClean ? `\n${descClean}` : "";
-  const typeLine = v.type ? `\ntype: ${v.type}` : "";
-  return `${v.title}\n${v.url}${typeLine}${desc}`;
+  return formatItem(v, { mode: "latest", includeScore: false, includeIndex: true });
 }
 
 function formatSearchItem(item) {
-  const idxPrefix = typeof item.index === "number" ? `${item.index}. ` : "";
-  const title = item.title || "(без названия)";
-  const url = item.url || (item.id ? `https://youtu.be/${item.id}` : "");
-  const score = typeof item.score === "number" ? item.score.toFixed(6) : item.score;
-  const desc = (item.description_indexed || "").trim();
-
-  let dateStr = null;
-  const rawPublished = item.published_at;
-  if (rawPublished) {
-    const dt = new Date(rawPublished);
-    dateStr = isNaN(dt.getTime()) ? String(rawPublished) : dt.toISOString().split("T")[0];
-  }
-
-  const typeStr = item.type ? String(item.type) : null;
-
-  const headerLines = [
-    `${idxPrefix}${title}`,
-    url ? `${url}` : null,
-    typeof score !== "undefined" ? `score: ${score}` : null,
-    dateStr ? `date: ${dateStr}` : null,
-    typeStr ? `type: ${typeStr}` : null,
-  ].filter(Boolean);
-
-  const body = desc ? `\n${desc}` : "";
-  const text = `${headerLines.join("\n")}${body}`;
-  // Возвращаем строку; разбиение по лимиту выполняет вызывающий код
-  return text;
+  return formatItem(item, { mode: "search", includeScore: true, includeIndex: true });
 }
 
 module.exports = {
   splitTextByLimit,
   truncateForLatest,
+  formatItem,
   formatLatestItem,
   formatSearchItem,
 };
