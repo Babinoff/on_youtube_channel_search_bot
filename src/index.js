@@ -1,6 +1,6 @@
 const { Bot } = require("grammy");
 const { logger, getLoggerCtx } = require("./config/logger");
-const { env, setGlobalChannelId, validateEnv } = require("./config/env");
+const { env, validateEnv } = require("./config/env");
 
 const { searchUnified } = require("./services/vector/search");
 const { splitTextByLimit, formatLatestItem, formatSearchItem } = require("./services/telegram/format");
@@ -12,6 +12,7 @@ const { getUserSettings, updateUserSettings, resetUserSettings } = require("./se
 const { setPendingInput, getPendingInput, clearPendingInput, hasPendingInput } = require("./services/telegram/state");
 const { getAdminChannels } = require("./services/admin/channels_store");
 const { applyAdminCommands, buildAdminHelpText } = require("./services/admin/router");
+const { getActiveChannelId, setActiveChannel } = require("./services/admin/server_settings_store");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Ранняя проверка окружения
@@ -71,7 +72,7 @@ async function main() {
     const waitMsg = await ctx.reply('Получаю последние видео…');
     const typingTimer = setInterval(() => { ctx.api.sendChatAction(ctx.chat.id, 'typing').catch(() => {}); }, 4500);
     try {
-      const input = s?.channelId || env.YOUTUBE_CHANNEL_ID;
+      const input = await getActiveChannelId();
       const items = await fetchLatestVideos({ input, limit: k, type });
 
       if (!items.length) {
@@ -146,9 +147,10 @@ async function main() {
 
       try {
         const us = getUserSettings(ctx.from.id);
+        const activeId = await getActiveChannelId();
         const logSearch = getLoggerCtx(ctx, { action: 'search' });
-        logSearch.info({ query, k, type: typeFilter, channelId: us?.channelId }, `Запрос поиска: "${query}" | k=${k} type=${typeFilter || 'none'}`);
-        const results = await searchUnified(query, k, { channelId: us?.channelId, type: typeFilter });
+        logSearch.info({ query, k, type: typeFilter, channelId: activeId }, `Запрос поиска: "${query}" | k=${k} type=${typeFilter || 'none'}`);
+        const results = await searchUnified(query, k, { channelId: activeId, type: typeFilter });
 
         if (!results.length) {
           clearInterval(typingTimer);
@@ -184,34 +186,38 @@ async function main() {
   // Кнопка: Настройки — показать inline‑клавиатуру с чекбоксами
   bot.hears('⚙️ Настройки', async (ctx) => {
     const userId = ctx.from?.id;
+    const isAdmin = env.ADMIN_USER_ID ? String(userId) === String(env.ADMIN_USER_ID) : false;
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
-    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
-
+    const activeId = await getActiveChannelId();
+    const s2 = { ...s, channelId: activeId };
+  
     const text = [
       'Настройки пользователя:',
-      `Тип выдачи: ${s.type || 'не задан'}`,
-      `k: ${s.k}`,
-      `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
+      `Тип выдачи: ${s2.type || 'не задан'}`,
+      `k: ${s2.k}`,
+      `score: ${s2.showScore ? 'показывать' : 'скрывать'}`,
     ].join('\n');
-
-    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
+  
+    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s2, channels, isAdmin) });
   });
   // Дублирующий хендлер без эмодзи для клиентов, присылающих только текст
   bot.hears('Настройки', async (ctx) => {
     const userId = ctx.from?.id;
+    const isAdmin = env.ADMIN_USER_ID ? String(userId) === String(env.ADMIN_USER_ID) : false;
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
-    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
-
+    const activeId = await getActiveChannelId();
+    const s2 = { ...s, channelId: activeId };
+  
     const text = [
       'Настройки пользователя:',
-      `Тип выдачи: ${s.type || 'не задан'}`,
-      `k: ${s.k}`,
-      `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
+      `Тип выдачи: ${s2.type || 'не задан'}`,
+      `k: ${s2.k}`,
+      `score: ${s2.showScore ? 'показывать' : 'скрывать'}`,
     ].join('\n');
-
-    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
+  
+    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s2, channels, isAdmin) });
   });
 
   // Кнопка: Помощь — вывести описание и вернуть клавиатуру
@@ -219,8 +225,8 @@ async function main() {
     await ctx.reply([
       'Как пользоваться ботом через клавиатуру:',
       '• "🔎 Поиск" — введите запрос; количество результатов (k) берётся из ⚙️ Настроек.',
-      '• "🆕 Последние" — показывает последние k видео выбранного канала.',
-      '• "⚙️ Настройки" — настройка типа выдачи, k и канала.',
+      '• "🆕 Последние" — показывает последние k видео активного канала.',
+      '• "⚙️ Настройки" — настройка типа выдачи и k.',
       '• "ℹ️ Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
       '\nПодсказка: k настраивается кнопками в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
@@ -231,8 +237,8 @@ async function main() {
     await ctx.reply([
       'Как пользоваться ботом через клавиатуру:',
       '• "Поиск" — введите запрос; количество результатов (k) берётся из Настроек.',
-      '• "Последние" — показывает последние k видео выбранного канала.',
-      '• "Настройки" — настройка типа выдачи, k и канала.',
+      '• "Последние" — показывает последние k видео активного канала.',
+      '• "Настройки" — настройка типа выдачи и k.',
       '• "Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
       '\nПодсказка: k настраивается кнопками в Настройках; максимум ограничен SEARCH_MAX_K.'
@@ -245,38 +251,11 @@ async function main() {
     await ctx.reply('Отменено. ' + defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
-  // Админ: список каналов
-  bot.command("channels", async (ctx) => {
-    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
-      await ctx.reply('Команда доступна только администратору.');
-      return;
-    }
-    const list = await getAdminChannels();
-    if (!list.length) { await ctx.reply('Список каналов пуст.'); return; }
-    const lines = list.map((c, i) => `• ${c.title}${c.handle ? ` (${c.handle})` : ''} — ${c.id}`);
-    const text = ['Каналы (админ):', ...lines].join('\n');
-    for (const part of splitTextByLimit(text, 3800)) {
-      await ctx.reply(part);
-    }
-  });
 
-  // Админ: добавить канал
-  bot.command("add_channel", async (ctx) => {
-    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
-      await ctx.reply('Команда доступна только администратору.');
-      return;
-    }
-    await ctx.reply('Список каналов управляется через .env (YOUTUBE_CHANNELS_ID). Команда отключена.');
-  });
 
-  // Админ: удалить канал
-  bot.command("remove_channel", async (ctx) => {
-    if (env.ADMIN_USER_ID && ctx.from?.id !== env.ADMIN_USER_ID) {
-      await ctx.reply('Команда доступна только администратору.');
-      return;
-    }
-    await ctx.reply('Список каналов управляется через .env (YOUTUBE_CHANNELS_ID). Команда отключена.');
-  });
+
+
+
 
   // Скрытая команда для администратора: список админ-команд
   bot.command("admin", async (ctx) => {
@@ -289,7 +268,7 @@ async function main() {
   });
 
   // Catch‑all: только неизвестные сообщения вне режима ввода — показать основное меню
-  const knownButtons = new Set(['🔎 Поиск', '🆕 Последние', '⚙️ Настройки', 'ℹ️ Помощь', 'Отмена', 'Настройки', 'Помощь']);
+  const knownButtons = new Set(['🔎 Поиск', '🆕 Последние', '⚙️ Настройки', 'ℹ️ Помощь', 'Отмена', 'Настройки', 'Помощь', 'Настройки']);
   bot.on('message', async (ctx) => {
     const txt = ctx.message?.text;
     if (typeof txt === 'string' && knownButtons.has(txt)) return;
@@ -300,62 +279,51 @@ async function main() {
   // Обработчик callback кнопок
   bot.on("callback_query:data", async (ctx) => {
     const userId = ctx.from?.id;
+    const isAdmin = env.ADMIN_USER_ID ? String(userId) === String(env.ADMIN_USER_ID) : false;
     const data = ctx.callbackQuery?.data || "";
     const { action, value } = parse(data);
     let s = getUserSettings(userId);
     const channels = await getAdminChannels();
-    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
+    const activeId = await getActiveChannelId();
+    const s2 = { ...s, channelId: activeId };
     const logSettings = getLoggerCtx(ctx, { action: 'settings' });
-
+  
     try {
       if (action === ACTIONS.SET_TYPE) {
         const type = value === "none" ? null : (value === "short" || value === "stream" || value === "video" ? value : null);
-        s = updateUserSettings(userId, { type });
+        s2 = updateUserSettings(userId, { type });
         logSettings.info({ action, value: type }, `Настройки: SET_TYPE -> ${type || 'none'}`);
         await ctx.answerCallbackQuery({ text: `Тип: ${type || 'не задан'}` });
       } else if (action === ACTIONS.SET_K) {
         const delta = parseInt(value, 10);
         const maxK = Number(env.SEARCH_MAX_K || 20);
-        const cur = Number(s.k || 0) || 1;
+        const cur = Number(s2.k || 0) || 1;
         let next = cur + (Number.isFinite(delta) ? delta : 0);
         next = Math.max(1, Math.min(maxK, next));
-        s = updateUserSettings(userId, { k: next });
+        s2 = updateUserSettings(userId, { k: next });
         logSettings.info({ action, delta, from: cur, to: next, maxK }, `Настройки: SET_K -> ${next}/${maxK} (delta=${delta})`);
         await ctx.answerCallbackQuery({ text: `k: ${next}/${maxK}` });
       } else if (action === ACTIONS.TOGGLE && value === 'score') {
-        s = updateUserSettings(userId, { showScore: !s.showScore });
-        logSettings.info({ action, showScore: s.showScore }, `Настройки: TOGGLE score -> ${s.showScore ? 'on' : 'off'}`);
-        await ctx.answerCallbackQuery({ text: s.showScore ? 'Показывать score' : 'Скрывать score' });
+        s2 = updateUserSettings(userId, { showScore: !s2.showScore });
+        logSettings.info({ action, showScore: s2.showScore }, `Настройки: TOGGLE score -> ${s2.showScore ? 'on' : 'off'}`);
+        await ctx.answerCallbackQuery({ text: s2.showScore ? 'Показывать score' : 'Скрывать score' });
       } else if (action === ACTIONS.RESET && value === 'all') {
-        s = resetUserSettings(userId);
-        if (!s.channelId && channels.length) {
-          s = updateUserSettings(userId, { channelId: channels[0].id });
-          setGlobalChannelId(channels[0].id);
-        }
+        s2 = resetUserSettings(userId);
         logSettings.info({ action }, 'Настройки: RESET all');
         await ctx.answerCallbackQuery({ text: 'Настройки сброшены' });
       } else if (action === ACTIONS.SET_CHANNEL) {
-        const cid = value;
-        if (cid === 'none') {
-          const firstId = channels[0]?.id;
-          if (firstId) {
-            s = updateUserSettings(userId, { channelId: firstId });
-            setGlobalChannelId(firstId);
-            logSettings.info({ action, channelId: firstId }, 'Настройки: SET_CHANNEL -> first');
-            await ctx.answerCallbackQuery({ text: 'Выбран первый канал' });
-          } else {
-            await ctx.answerCallbackQuery({ text: 'Список каналов пуст' });
-          }
+        if (!isAdmin) {
+          await ctx.answerCallbackQuery({ text: 'Недоступно: только администратор' });
         } else {
+          const cid = value;
           const allowedIds = channels.map(c => c.id);
           if (!allowedIds.includes(cid)) {
             logSettings.info({ action, attempted: cid }, 'Настройки: SET_CHANNEL -> not allowed');
             await ctx.answerCallbackQuery({ text: 'Канал не разрешён администратором' });
           } else {
-            s = updateUserSettings(userId, { channelId: cid });
-            setGlobalChannelId(cid);
-            logSettings.info({ action, channelId: cid }, 'Настройки: SET_CHANNEL -> selected');
-            await ctx.answerCallbackQuery({ text: 'Канал выбран' });
+            await setActiveChannel(cid);
+            logSettings.info({ action, channelId: cid }, 'Настройки: SET_CHANNEL -> active changed');
+            await ctx.answerCallbackQuery({ text: 'Активный канал изменён' });
           }
         }
       } else if (action === ACTIONS.CLOSE && value === 'settings') {
@@ -367,18 +335,20 @@ async function main() {
       } else {
         await ctx.answerCallbackQuery();
       }
-
+  
+      const currentActive = await getActiveChannelId();
+      const finalSettings = { ...getUserSettings(userId), channelId: currentActive };
       const text = [
         "Настройки пользователя:",
-        `Тип выдачи: ${s.type || 'не задан'}`,
-        `k: ${s.k}`,
-        `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
+        `Тип выдачи: ${finalSettings.type || 'не задан'}`,
+        `k: ${finalSettings.k}`,
+        `score: ${finalSettings.showScore ? 'показывать' : 'скрывать'}`,
       ].join("\n");
-
+  
       try {
-        await ctx.editMessageText(text, { reply_markup: buildSettingsKeyboard(s, channels) });
+        await ctx.editMessageText(text, { reply_markup: buildSettingsKeyboard(finalSettings, channels, isAdmin) });
       } catch {
-        await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
+        await ctx.reply(text, { reply_markup: buildSettingsKeyboard(finalSettings, channels, isAdmin) });
       }
     } catch (err) {
       const logSettings = getLoggerCtx(ctx, { action: 'settings' });

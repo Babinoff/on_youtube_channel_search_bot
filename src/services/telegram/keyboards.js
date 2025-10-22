@@ -1,7 +1,7 @@
 const { env } = require("../../config/env");
 const { builders } = require("./callbacks");
 
-function buildSettingsKeyboard(s, channels) {
+function buildSettingsKeyboard(s, channels, isAdmin = false) {
   const typeRow = [
     { text: `Shorts${s.type === 'short' ? ' ✅' : ''}`, callback_data: builders.setType('short') },
     { text: `Stream${s.type === 'stream' ? ' ✅' : ''}`, callback_data: builders.setType('stream') },
@@ -18,13 +18,15 @@ function buildSettingsKeyboard(s, channels) {
   ];
 
   const channelRows = [];
-  for (let i = 0; i < channels.length; i += 2) {
-    const a = channels[i];
-    const b = channels[i + 1];
-    const row = [];
-    if (a) row.push({ text: `${s.channelId === a.id ? '✅ ' : ''}${a.title}`, callback_data: builders.setChannel(a.id) });
-    if (b) row.push({ text: `${s.channelId === b.id ? '✅ ' : ''}${b.title}`, callback_data: builders.setChannel(b.id) });
-    if (row.length) channelRows.push(row);
+  if (isAdmin) {
+    for (let i = 0; i < channels.length; i += 2) {
+      const a = channels[i];
+      const b = channels[i + 1];
+      const row = [];
+      if (a) row.push({ text: `${s.channelId === a.id ? '✅ ' : ''}${a.title}`, callback_data: builders.setChannel(a.id) });
+      if (b) row.push({ text: `${s.channelId === b.id ? '✅ ' : ''}${b.title}`, callback_data: builders.setChannel(b.id) });
+      if (row.length) channelRows.push(row);
+    }
   }
 
   const miscRow = [
