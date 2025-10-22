@@ -56,6 +56,7 @@
      ```
    - Обеспечить, что дальнейшее логирование и формирование ответа используют `finalRows`.
    - Это устранит ошибку и подключит адаптивную логику к реальному поиску.
+1) Реализовано: интегрирован адаптивный фильтр в `searchTopK` (`src/services/vector/lancedb.js`): добавлен `const finalRows = applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName });`, `finalRows` используется в логировании и формировании ответа.
 
 2) Расширить логирование итогового результата
    - В `adaptive_filter.js` и/или в завершении `searchTopK` добавить инфо‑лог:
@@ -63,6 +64,7 @@
      logger.info({ tableName, count: finalRows.length, finalThreshold: /* актуальное значение */, metricType: hasDistanceKey ? 'distance' : isSimilarityScore ? 'similarity' : 'unknown', providerMax: getProviderDistanceMax() }, 'Адаптивный поиск: итог');
      ```
    - Это упростит анализ поведения и расчёт разумных значений env‑параметров.
+2) Реализовано: добавлен финальный инфо‑лог в `searchTopK` (`src/services/vector/lancedb.js`) с полями `{ finalThreshold, metricType, providerMax }`. `finalThreshold` вычисляется как максимум `distance` среди `finalRows` или как `1 - min(score)` при метрике `similarity`.
 
 3) Добавить интеграционный тест для LanceDB‑поиска
    - Новый файл: `tests/search_lancedb_integration.test.js`.

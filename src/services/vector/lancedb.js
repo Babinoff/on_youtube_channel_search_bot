@@ -191,10 +191,29 @@ async function searchTopK(query, k = 5, opts = {}) {
 
   // Адаптивная пороговая фильтрация: distance vs similarity
   const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;
+  const finalRows = applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName });
 
 
 
   logger.info({ tableName, k, count: finalRows.length, maxDistance, typeFilter }, "Поиск LanceDB завершён (лимит применён в конце)");
+
+  // Финальный лог адаптивного порога: итоговое значение, тип метрики, максимум провайдера
+  const providerMax = getProviderDistanceMax();
+  const hasDistanceKey = finalRows.some(r => typeof r._distance === 'number' || typeof r.distance === 'number');
+  const isSimilarityScore = !hasDistanceKey && finalRows.some(r => typeof r.score === 'number');
+  let finalThreshold = null;
+  if (hasDistanceKey) {
+    const distances = finalRows
+      .map(r => (typeof r._distance === 'number' ? r._distance : r.distance))
+      .filter(v => typeof v === 'number');
+    finalThreshold = distances.length ? Math.max(...distances) : null;
+  } else if (isSimilarityScore) {
+    const scores = finalRows.map(r => r.score).filter(v => typeof v === 'number');
+    finalThreshold = scores.length ? (1 - Math.min(...scores)) : null;
+  }
+  const metricType = hasDistanceKey ? 'distance' : (isSimilarityScore ? 'similarity' : 'unknown');
+  logger.info({ tableName, count: finalRows.length, finalThreshold, metricType, providerMax }, 'Адаптивный поиск: итог');
+
   return finalRows.map((r, i) => ({
     index: i + 1,
     id: r.id,
