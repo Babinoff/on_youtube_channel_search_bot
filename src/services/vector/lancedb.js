@@ -4,6 +4,7 @@ const path = require("path");
 const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
 const { embedTexts, getProviderDistanceMax } = require("../embeddings");
+const { applyAdaptiveFilter } = require("./adaptive_filter");
 const { isLocked, waitForUnlock } = require("../concurrency/lock");
 const { readLockInfo } = require("../concurrency/lock");
 const { normalizeQueryText } = require("../text/query_normalize");
@@ -190,69 +191,8 @@ async function searchTopK(query, k = 5, opts = {}) {
 
   // Адаптивная пороговая фильтрация: distance vs similarity
   const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;
-  const hasDistanceKey = rows.some((r) => typeof (r._distance ?? r.distance) === 'number');
-  const isSimilarityScore = !hasDistanceKey && rows.some((r) => typeof r.score === 'number');
-  const minScore = isSimilarityScore ? Math.max(0, Math.min(1, 1 - (Number(maxDistance) || 0))) : null;
-  logger.info({ tableName, metric: hasDistanceKey ? 'distance' : (isSimilarityScore ? 'similarity' : 'unknown'), maxDistance, minScore }, "Поиск: метрика и порог");
 
-  const rowsTypeFiltered = typeFilter
-    ? rows.filter((r) => (r.type || 'video') === typeFilter)
-    : rows;
-  const rowsDistanceFiltered = rowsTypeFiltered.filter((r) => {
-    if (hasDistanceKey) {
-      const d = r._distance ?? r.distance;
-      return typeof d === 'number' ? d <= maxDistance : true;
-    }
-    if (isSimilarityScore) {
-      const s = r.score;
-      const minScore = Math.max(0, Math.min(1, 1 - (Number(maxDistance) || 0)));
-      return typeof s === 'number' ? s >= minScore : true;
-    }
-    const d = r._distance ?? r.distance ?? r.score;
-    return typeof d === 'number' ? d <= maxDistance : true;
-  });
 
-  let finalRows = rowsDistanceFiltered.slice(0, k);
-
-  // Если ничего не найдено — итеративно ослабляем порог до верхней границы метрики провайдера
-  if (!finalRows.length && rowsTypeFiltered.length) {
-    const boundMax = getProviderDistanceMax();
-    const iters = Number(env.SEARCH_ADAPTIVE_ITERS || 3);
-    const step = Number(env.SEARCH_ADAPTIVE_STEP || 0.1);
-    let curMax = Number(maxDistance) || 0.7;
-
-    for (let i = 1; i <= iters; i++) {
-      const nextMax = Math.min(curMax + step, boundMax);
-      if (nextMax <= curMax) break;
-      logger.warn({ tableName, from: curMax, to: nextMax, iter: i }, 'Адаптивный порог: расширяю maxDistance');
-
-      let adapted;
-      if (hasDistanceKey) {
-        adapted = rowsTypeFiltered.filter((r) => {
-          const d = r._distance ?? r.distance;
-          return typeof d === 'number' ? d <= nextMax : true;
-        });
-      } else if (isSimilarityScore) {
-        const minScoreIter = Math.max(0, Math.min(1, 1 - nextMax));
-        adapted = rowsTypeFiltered.filter((r) => {
-          const s = r.score;
-          return typeof s === 'number' ? s >= minScoreIter : true;
-        });
-      } else {
-        // Неизвестная метрика: fallback — взять топ-k как есть
-        adapted = rowsTypeFiltered;
-      }
-
-      finalRows = adapted.slice(0, k);
-      curMax = nextMax;
-      if (finalRows.length) break;
-      if (curMax >= boundMax) break;
-    }
-
-    if (!finalRows.length && !hasDistanceKey && !isSimilarityScore) {
-      finalRows = rowsTypeFiltered.slice(0, k);
-    }
-  }
 
   logger.info({ tableName, k, count: finalRows.length, maxDistance, typeFilter }, "Поиск LanceDB завершён (лимит применён в конце)");
   return finalRows.map((r, i) => ({
@@ -267,4 +207,4 @@ async function searchTopK(query, k = 5, opts = {}) {
   }));
 }
 
-module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK, getChannelTableName, openChannelTableIfExists, addDocsToChannelTable, createChannelTable }
+module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK, applyAdaptiveFilter, getChannelTableName, openChannelTableIfExists, addDocsToChannelTable, createChannelTable }

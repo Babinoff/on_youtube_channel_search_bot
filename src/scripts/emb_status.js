@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { logger } = require("../config/logger");
 const { env } = require("../config/env");
-const { resolveProviderChain } = require("../services/embeddings");
+const { resolveProviderChain, getProviderDistanceMax } = require("../services/embeddings");
 const { findLatestTestTableName, openLatestTestTable, openChannelTableIfExists, searchTopK } = require("../services/vector/lancedb");
 
 function fmtMs(ms) {
@@ -111,7 +111,8 @@ async function readTableStats() {
 async function testSearch(sampleText) {
   try {
     const channelId = env.YOUTUBE_CHANNEL_ID || null;
-    const res = await searchTopK(sampleText, 5, { channelId, maxDistance: 999 });
+    const providerMax = getProviderDistanceMax();
+    const res = await searchTopK(sampleText, 5, { channelId, maxDistance: providerMax });
     const scores = res.map(r => Number(r.score)).filter(n => Number.isFinite(n));
     const stats = scores.length ? {
       count: scores.length,
@@ -119,37 +120,28 @@ async function testSearch(sampleText) {
       max: Math.max(...scores),
       avg: scores.reduce((s, n) => s + n, 0) / scores.length,
     } : { count: 0 };
-    return { ok: true, res, stats };
+    return { ok: true, res, stats, providerMax };
   } catch (e) {
     return { ok: false, err: e?.message || String(e) };
   }
 }
 
-function printDynamicRecommendation(active, stats) {
+function printAdaptiveRecommendation(active, stats) {
   if (!active) return;
-  console.log("\n=== Рекомендация по threshold ===");
-  if (active === 'xenova') {
-    const avg = Number(stats?.avg);
-    const max = Number(stats?.max);
-    if (Number.isFinite(avg) && Number.isFinite(max)) {
-      // Если шкала похожа на нормированную L2 (~0.9–1.5)
-      if (max <= 1.8) {
-        console.log("Таблица выглядит нормированной. Используйте threshold 1.25–1.35.");
-        console.log("Для надёжности можно поставить 1.40 и затем сузить.");
-        return;
-      }
-      // Если шкала старая (ненормированная) — значения 2+ и выше
-      if (max > 1.8) {
-        console.log("Обнаружена старая шкала расстояний (ненормированная). Временно увеличьте threshold до 3.5–4.0.");
-        console.log("Затем выполните чистую переиндексацию канала, чтобы перейти на нормированную шкалу.");
-        return;
-      }
-    }
-    // Фоллбек
-    console.log("Для Xenova обычно подходит 1.25–1.35; при малом отзыве — 1.40.");
-  } else {
-    console.log(`Активный провайдер: ${active}. Подберите threshold эмпирически на 5–10 запросах.`);
+  const iters = Number(env.SEARCH_ADAPTIVE_ITERS || 3);
+  const step = Number(env.SEARCH_ADAPTIVE_STEP || 0.1);
+  const start = Number(env.SEARCH_MAX_DISTANCE || 0.7);
+  const providerMax = getProviderDistanceMax();
+
+  console.log("\n=== Рекомендация по порогу (адаптивно) ===");
+  console.log(`Активный провайдер: ${active}`);
+  console.log(`Диапазон метрики: [0..${providerMax}]`);
+  console.log(`Стартовый порог SEARCH_MAX_DISTANCE: ${start}`);
+  console.log(`Адаптация: iters=${iters}, step=${step}`);
+  if (Number.isFinite(stats?.avg) && Number.isFinite(stats?.max)) {
+    console.log(`Статистика выборки: score[min=${stats.min?.toFixed ? stats.min.toFixed(4) : stats.min}, max=${stats.max?.toFixed ? stats.max.toFixed(4) : stats.max}, avg=${stats.avg?.toFixed ? stats.avg.toFixed(4) : stats.avg}]`);
   }
+  console.log("Алгоритм: при пустом первом проходе порог увеличивается итеративно до верхней границы провайдера. Финальный фоллбек — топ‑k без порога.");
 }
 
 async function main() {
@@ -162,6 +154,8 @@ async function main() {
   console.log(`EMBEDDINGS_PROVIDER_CHAIN: ${chain.join(', ')}`);
   console.log(`SEARCH_MAX_DISTANCE: ${env.SEARCH_MAX_DISTANCE}`);
   console.log(`SEARCH_MAX_K: ${env.SEARCH_MAX_K}`);
+  console.log(`SEARCH_ADAPTIVE_ITERS: ${env.SEARCH_ADAPTIVE_ITERS}`);
+  console.log(`SEARCH_ADAPTIVE_STEP: ${env.SEARCH_ADAPTIVE_STEP}`);
   console.log(`LANCEDB_DIR: ${env.LANCEDB_DIR || './data/lancedb'}`);
 
   console.log("\n=== Провайдеры: статус ===");
@@ -195,7 +189,7 @@ async function main() {
     console.log(`channel: не задан (YOUTUBE_CHANNEL_ID)`);
   }
 
-  console.log("\n=== Поиск: быстрая проверка (без порога) ===");
+  console.log("\n=== Поиск: быстрая проверка (порог = максимум провайдера) ===");
   const s = await testSearch(sampleText);
   if (!s.ok) {
     console.log(`search: ERROR ${s.err}`);
@@ -206,8 +200,8 @@ async function main() {
     });
   }
 
-  // Dynamic threshold recommendation
-  printDynamicRecommendation(active, s.stats);
+  // Adaptive configuration & recommendation
+  printAdaptiveRecommendation(active, s.stats);
 }
 
 main().catch((err) => {
