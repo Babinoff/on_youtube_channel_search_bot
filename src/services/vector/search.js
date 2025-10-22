@@ -1,6 +1,7 @@
 const { env } = require('../../config/env');
 const { searchTopK } = require('./lancedb');
 const { normalizeQueryText } = require('../text/query_normalize');
+const { logger } = require('../../config/logger');
 
 function clampK(k) {
   const maxK = Number(env.SEARCH_MAX_K || 20);
@@ -9,9 +10,15 @@ function clampK(k) {
 }
 
 function normalizeThreshold(threshold) {
-  // Simplified: parse numeric or fall back to env.SEARCH_MAX_DISTANCE
-  let t = typeof threshold === 'number' ? threshold : parseFloat(threshold);
-  if (!isFinite(t)) t = Number(env.SEARCH_MAX_DISTANCE || 0.7);
+  // Parse numeric or fall back to env.SEARCH_MAX_DISTANCE; clamp to >= 0
+  const parsed = (typeof threshold === 'number') ? threshold : parseFloat(threshold);
+  let t = Number.isFinite(parsed) ? parsed : Number(env.SEARCH_MAX_DISTANCE || 0.7);
+  if (t < 0) {
+    try {
+      logger.warn({ original: parsed }, 'normalizeThreshold: clamped negative to 0');
+    } catch {}
+    t = 0;
+  }
   return t;
 }
 

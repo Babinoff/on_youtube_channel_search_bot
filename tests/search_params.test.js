@@ -22,7 +22,7 @@ describe('search params normalization and metric unification', () => {
     const { normalizeThreshold } = mod;
     expect(normalizeThreshold('0.9')).toBeCloseTo(0.9, 6);
     expect(normalizeThreshold(1.5)).toBeCloseTo(1.5, 6);
-    expect(normalizeThreshold(-0.2)).toBeCloseTo(-0.2, 6);
+    expect(normalizeThreshold(-0.2)).toBeCloseTo(0, 6);
     expect(normalizeThreshold('not-a-number')).toBeCloseTo(0.7, 6); // default from env
   });
 
