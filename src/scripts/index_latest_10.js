@@ -4,13 +4,12 @@ const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
 const { embedTexts } = require("../services/embeddings");
-const { createTestTable } = require("../services/vector/lancedb");
+const { addDocsToChannelTable } = require("../services/vector/lancedb");
 const { normalizeDescription } = require("../services/text/normalize");
 const { toVideoEntity } = require("../services/youtube/video");
 
 
 // Heuristic: strip trailing self‑promo sections using patterns from env
-
 
 
 
@@ -33,11 +32,13 @@ async function main() {
     }
     
 
+    // Отныне аргумент из CLI имеет приоритет над .env
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
-    const input = inputEnv || inputArg;
+    const useArg = Boolean(inputArg);
+    const input = useArg ? inputArg : inputEnv;
     if (!input) {
-      logger.info("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент: npm run index:test -- <channelId|url|@handle>");
+      logger.info("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID): npm run index:test -- <channelId|url|@handle>");
       process.exit(1);
     }
 
@@ -50,8 +51,8 @@ async function main() {
     await updateLockMeta('indexing', { stage: 'resolve_channel', input });
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    logger.info({ inputFrom: inputEnv ? "env" : "argv", input }, "Резолв канала...");
-    const channelId = inputEnv ? inputEnv : await resolveChannelId(input, client);
+    logger.info({ inputFrom: useArg ? "argv" : "env", input }, "Резолв канала...");
+    const channelId = useArg ? await resolveChannelId(inputArg, client) : inputEnv;
     await updateLockMeta('indexing', { stage: 'list_uploads', channelId });
     logger.info({ channelId }, "Канал определён");
 
@@ -94,8 +95,8 @@ async function main() {
 
     const docs = docsMeta.map((d, i) => ({ ...d, vector: vectors[i] }));
     await updateLockMeta('indexing', { stage: 'insert', total: docs.length });
-    const { tableName } = await createTestTable(docs);
-    logger.info({ tableName, inserted: docs.length }, "Тестовая таблица создана и заполнена");
+    const { tableName } = await addDocsToChannelTable(channelId, docs);
+    logger.info({ tableName, inserted: docs.length }, "Таблица канала обновлена");
 
     const sample = docs[0];
     if (sample) {
@@ -103,10 +104,10 @@ async function main() {
     }
 
     await updateLockMeta('indexing', { stage: 'done' });
-    logger.info("Тестовая индексация завершена успешно.");
+    logger.info("Индексация канала завершена успешно.");
   } catch (err) {
     const data = err?.response?.data;
-    logger.error({ err: data || err.message }, "Ошибка при тестовой индексации YouTube → LanceDB");
+    logger.error({ err: data || err.message }, "Ошибка при индексации канала YouTube → LanceDB");
   } finally {
     if (stopHeartbeat) stopHeartbeat();
     if (lockAcquired) {

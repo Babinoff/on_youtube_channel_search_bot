@@ -71,7 +71,8 @@ async function createTestTable(docs) {
 
 // ===== Channel table helpers =====
 function getChannelTableName(channelId) {
-  return `video_embeddings_${channelId}`;
+  const provider = env.EMBEDDINGS_PROVIDER || 'default';
+  return `video_embeddings_${provider}_${channelId}`;
 }
 
 async function openChannelTableIfExists(channelId) {

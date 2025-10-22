@@ -71,11 +71,13 @@ async function main() {
     }
     
 
+    // Отныне аргумент из CLI имеет приоритет над .env
     const inputArg = process.argv[2];
     const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
-    const input = inputEnv || inputArg;
+    const useArg = Boolean(inputArg);
+    const input = useArg ? inputArg : inputEnv;
     if (!input) {
-      logger.info("Укажите канал через .env (YOUTUBE_CHANNEL_ID) или аргумент: npm run index:batch -- <channelId|url|@handle> --limit 100");
+      logger.info("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID): npm run index:batch -- <channelId|url|@handle> --limit 100");
       process.exit(1);
     }
 
@@ -90,7 +92,7 @@ async function main() {
 
     await updateLockMeta('indexing', { stage: 'resolve_channel', input });
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    const channelId = inputEnv ? inputEnv : await resolveChannelId(input, client);
+    const channelId = useArg ? await resolveChannelId(inputArg, client) : inputEnv;
 
     // Read existing IDs once, before paginating, to enable early stop
     await updateLockMeta('indexing', { stage: 'read_existing', channelId });
@@ -160,26 +162,17 @@ async function main() {
       };
     });
 
-    const texts = docsMeta.map(d => `${d.title}\n\n${d.description_indexed}`);
-    await updateLockMeta('indexing', { stage: 'embedding', total: texts.length, current: 0 });
-    logger.info({ count: texts.length }, "Запрос эмбеддингов");
-    const vectors = await embedTexts(texts);
-    await updateLockMeta('indexing', { stage: 'embedding', current: texts.length });
-    if (!vectors.length) throw new Error("Эмбеддинги не получены");
+    await updateLockMeta('indexing', { stage: 'embedding', total: docsMeta.length, current: 0 });
+    const vectors = await embedTexts(docsMeta.map(d => `${d.title}\n\n${d.description_indexed}`));
+    await updateLockMeta('indexing', { stage: 'embedding', current: docsMeta.length });
 
-    // Привязка векторов и фильтрация пустых (в случае пропуска части)
-    let docs = docsMeta.map((d, i) => ({ ...d, vector: vectors[i] })).filter((d) => Array.isArray(d.vector));
-    const skipped = docsMeta.length - docs.length;
-    if (skipped > 0) {
-      logger.warn({ skipped }, "Часть документов без эмбеддингов будет пропущена");
-    }
+    const docs = docsMeta.map((d, i) => ({ ...d, vector: vectors[i] }));
 
-    await updateLockMeta('indexing', { stage: 'insert', total: docs.length });
-    const chunkSize = Math.max(1, Number(env.LANCEDB_INSERT_BATCH_SIZE || 50));
-    const maxInsertAttempts = Math.max(1, Number(env.LANCEDB_INSERT_MAX_ATTEMPTS || 3));
+    // Insert in smaller chunks with simple retry for stability
+    const maxInsertAttempts = 3;
     let inserted = 0;
-    for (let i = 0; i < docs.length; i += chunkSize) {
-      const chunk = docs.slice(i, i + chunkSize);
+    for (let i = 0; i < docs.length; i += 100) {
+      const chunk = docs.slice(i, i + 100);
       let success = false;
       for (let attempt = 1; attempt <= maxInsertAttempts; attempt++) {
         try {
