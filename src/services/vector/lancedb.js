@@ -140,23 +140,30 @@ async function searchTopK(query, k = 5, opts = {}) {
   // Предпочитаем таблицу выбранного канала; если отсутствует — сообщаем об ошибке
   let table;
   let tableName;
-  const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
-  if (preferredChannelId) {
-    const opened = await openChannelTableIfExists(preferredChannelId);
-    if (opened.table) {
-      table = opened.table;
-      tableName = opened.tableName;
-      logger.info({ tableName, channelId: preferredChannelId }, "Поиск: использую таблицу канала");
-    } else {
-      tableName = opened.tableName;
-      logger.warn({ tableName, channelId: preferredChannelId }, "Поиск: таблица канала отсутствует или недоступна");
-      throw new Error(`Таблица недоступна: ${tableName}. Попросите администратора создать и проиндексировать канал.`);
-    }
+  // Тестовый хук: использовать мок-таблицу, если передана через opts
+  if (opts && opts.mockTable) {
+    table = opts.mockTable;
+    tableName = opts.mockTableName || 'video_embeddings_mock';
+    logger.info({ tableName }, "Поиск: использую мок-таблицу (тест)");
   } else {
-    const openedTest = await openLatestTestTable();
-    table = openedTest.table;
-    tableName = openedTest.tableName;
-    logger.info({ tableName }, "Поиск: использую тестовую таблицу (latest10)");
+    const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
+    if (preferredChannelId) {
+      const opened = await openChannelTableIfExists(preferredChannelId);
+      if (opened.table) {
+        table = opened.table;
+        tableName = opened.tableName;
+        logger.info({ tableName, channelId: preferredChannelId }, "Поиск: использую таблицу канала");
+      } else {
+        tableName = opened.tableName;
+        logger.warn({ tableName, channelId: preferredChannelId }, "Поиск: таблица канала отсутствует или недоступна");
+        throw new Error(`Таблица недоступна: ${tableName}. Попросите администратора создать и проиндексировать канал.`);
+      }
+    } else {
+      const openedTest = await openLatestTestTable();
+      table = openedTest.table;
+      tableName = openedTest.tableName;
+      logger.info({ tableName }, "Поиск: использую тестовую таблицу (latest10)");
+    }
   }
 
   // Совместимость с разными версиями LanceDB: prefer vectorSearch() если доступен
