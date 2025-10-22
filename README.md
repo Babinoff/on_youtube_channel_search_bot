@@ -78,18 +78,19 @@
 
 ## Админ‑команды (через `/admin`)
 Доступны только пользователю с `ADMIN_USER_ID`:
-- `/lock_status` — статус лок‑файла индексации.
-- `/lock_force` — принудительное освобождение лок‑файла.
-- `/channel_db_list` — список таблиц каналов в LanceDB.
-- `/channel_db_delete <channel> --yes` — удалить таблицу канала.
-- `/channel_stats [channel]` — сводная статистика индексации по каналу.
-- `/channel_db_stats [channel]` — статистика по LanceDB (без запросов в YouTube).
-- `/check_youtube [channel]` — резолв канала, плейлист загрузок, первые `videoId`.
-- `/index_latest [channel]` — тестовая индексация 10 видео.
-- `/index_batch [channel] [--limit N] [--stop-on-first-known on|off]` — батч‑индексация.
-- `/preview_latest` — предпросмотр очистки по `.env`.
-- `/search_latest <query>` — тестовый поиск в тестовой таблице.
-- `/env_check` — сводка и валидация окружения.
+- /lock_status [name] — показать статус блокировок.
+- /lock_force [name] [--force] — принудительно снять блокировку.
+- /channel_db_list — список таблиц каналов в LanceDB.
+- /channel_db_delete <@хэндл YouTube-канала|channelId> --yes — удалить таблицу канала в LanceDB.
+- /channel_stats [@хэндл YouTube-канала|channelId] — сводная статистика индексации по каналу.
+- /channel_db_stats [@хэндл YouTube-канала|channelId] — статистика по LanceDB для канала (без запросов в YouTube).
+- /check_youtube [@хэндл YouTube-канала|channelId] — проверка YouTube API: резолв канала и первые videoId.
+- /index_latest [@хэндл YouTube-канала|channelId] — индексировать последние 10 видео канала.
+- /index_batch [@хэндл YouTube-канала|channelId] [--limit N] [--stop-on-first-known on|off] — массовая индексация с лимитом и остановом на первом известном.
+- /preview_latest — предпросмотр очистки последних 10 видео по .env.
+- /search_latest <query> — тестовый поиск по тестовой таблице.
+- /env_check — сводка и валидация окружения.
+- /emb_status — статус провайдера эмбеддингов и размерность.
 
 ## Скрипты (CLI)
 Все команды запускаются через `npm run <script> -- [аргументы]`.

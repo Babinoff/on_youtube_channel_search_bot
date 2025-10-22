@@ -4,6 +4,41 @@ const { splitTextByLimit } = require("../telegram/format");
 const path = require("path");
 const { execFile } = require("child_process");
 
+// Реестр админ-команд: описание и пример использования
+const ADMIN_COMMANDS = [
+  { name: "lock_status", usage: "/lock_status [name]", description: "показать статус блокировок." },
+  { name: "lock_force", usage: "/lock_force [name] [--force]", description: "принудительно снять блокировку." },
+  { name: "channel_db_list", usage: "/channel_db_list", description: "список таблиц каналов в LanceDB." },
+  { name: "channel_db_delete", usage: "/channel_db_delete <@хэндл YouTube-канала|channelId> --yes", description: "удалить таблицу канала в LanceDB." },
+  { name: "channel_stats", usage: "/channel_stats [@хэндл YouTube-канала|channelId]", description: "сводная статистика индексации по каналу." },
+  { name: "channel_db_stats", usage: "/channel_db_stats [@хэндл YouTube-канала|channelId]", description: "статистика по LanceDB для канала (без запросов в YouTube)." },
+  { name: "check_youtube", usage: "/check_youtube [@хэндл YouTube-канала|channelId]", description: "проверка YouTube API: резолв канала и первые videoId." },
+  { name: "index_latest", usage: "/index_latest [@хэндл YouTube-канала|channelId]", description: "индексировать последние 10 видео канала." },
+  { name: "index_batch", usage: "/index_batch [@хэндл YouTube-канала|channelId] [--limit N] [--stop-on-first-known on|off]", description: "массовая индексация с лимитом и остановом на первом известном." },
+  { name: "preview_latest", usage: "/preview_latest", description: "предпросмотр очистки последних 10 видео по .env." },
+  { name: "search_latest", usage: "/search_latest <query>", description: "тестовый поиск по тестовой таблице." },
+  { name: "env_check", usage: "/env_check", description: "сводка и валидация окружения." },
+  { name: "emb_status", usage: "/emb_status", description: "статус провайдера эмбеддингов и размерность." },
+];
+
+function buildAdminHelpText() {
+  const header = 'Админ-команды (запуск служебных скриптов):';
+  const lines = ADMIN_COMMANDS.map(c => `• ${c.usage} — ${c.description}`);
+  const examples = [
+    '',
+    'Примеры:',
+    '• /index_latest @хэндл',
+    '• /index_batch @хэндл --limit 100 --stop-on-first-known on',
+    '• /channel_db_delete @хэндл --yes',
+  ];
+  return [header, ...lines, ...examples].join('\n');
+}
+
+// Добавлен генератор Markdown для README (список в виде маркдаун-«пулек»)
+function buildAdminMarkdownList() {
+  return ADMIN_COMMANDS.map(c => `- ${c.usage} — ${c.description}`).join('\n');
+}
+
 function isAdmin(ctx) {
   const uid = ctx?.from?.id;
   return env.ADMIN_USER_ID ? String(uid) === String(env.ADMIN_USER_ID) : false;
@@ -265,4 +300,7 @@ module.exports = {
   extractArgs,
   isAdmin,
   ensureAdmin,
+  ADMIN_COMMANDS,
+  buildAdminHelpText,
+  buildAdminMarkdownList,
 };

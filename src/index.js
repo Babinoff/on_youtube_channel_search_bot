@@ -11,7 +11,7 @@ const { ACTIONS, parse } = require("./services/telegram/callbacks");
 const { getUserSettings, updateUserSettings, resetUserSettings } = require("./services/user/settings_store");
 const { setPendingInput, getPendingInput, clearPendingInput, hasPendingInput } = require("./services/telegram/state");
 const { getAdminChannels } = require("./services/admin/channels_store");
-const { applyAdminCommands } = require("./services/admin/router");
+const { applyAdminCommands, buildAdminHelpText } = require("./services/admin/router");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Ранняя проверка окружения
@@ -44,86 +44,71 @@ function requireEnvOrWarn(name, ctx) {
 async function main() {
   const token = env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    logger.error("TELEGRAM_BOT_TOKEN отсутствует — заполните .env");
+    logger.error("TELEGRAM_BOT_TOKEN отсутствует. Заполните .env и повторите.");
     process.exit(1);
   }
-  if (!env.YOUTUBE_API_KEY) {
-    logger.warn("YOUTUBE_API_KEY отсутствует — команда /latest работать не будет");
-  }
-
   const bot = new Bot(token);
-  const defaultMessage = "Можно запускать следующий поиск.";
+
   applyAdminCommands(bot);
 
+  const defaultMessage = 'Выберите действие на клавиатуре: 🔎 Поиск, 🆕 Последние, ⚙️ Настройки, ℹ️ Помощь';
 
-
-  // /start
   bot.command("start", async (ctx) => {
-    await ctx.reply("Привет! Я бот для поиска релевантных YouTube‑видео. Попробуйте /help.", { reply_markup: buildMainKeyboard() });
+    await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
   });
 
-  // /help
-  bot.command("help", async (ctx) => {
-    await ctx.reply([
-      "Как пользоваться ботом через клавиатуру:",
-      "• \"🔎 Поиск\" — введите текст запроса; количество результатов (k) берётся из ⚙️ Настроек.",
-      "• \"🆕 Последние\" — показывает последние k видео выбранного канала (канал берётся из ⚙️ Настроек).",
-      "• \"⚙️ Настройки\" — управление типом выдачи (short/stream/video), количеством результатов (k) и выбором канала.",
-      "• \"ℹ️ Помощь\" — выводит эту подсказку и возвращает клавиатуру."
-    ].join("\n"), { reply_markup: buildMainKeyboard() });
-  });
-
-  // Кнопка: Поиск
   bot.hears('🔎 Поиск', async (ctx) => {
-    setPendingInput(ctx.from.id, { mode: 'search', createdAt: Date.now() });
-    await ctx.reply('Введите поисковый запрос:', { reply_markup: { force_reply: true } });
+    setPendingInput(ctx.from.id, { mode: 'search' });
+    await ctx.reply('Введите запрос для поиска (или "Отмена")', { reply_markup: buildMainKeyboard() });
   });
 
-  // Кнопка: Последние
   bot.hears('🆕 Последние', async (ctx) => {
-    // Показываем сразу последние видео для активного канала
-    if (!requireEnvOrWarn('YOUTUBE_API_KEY', ctx)) return;
-    const us = getUserSettings(ctx.from?.id);
-    const adminChannels = await getAdminChannels();
-    const logLatest = getLoggerCtx(ctx, { action: 'latest' });
-    if (!adminChannels.length) {
-      logLatest.warn("Список каналов администратора пуст");
-      await ctx.reply("Список каналов администратора пуст. Обратитесь к администратору.");
-      return;
-    }
-    const allowedIds = adminChannels.map(c => c.id);
-    let inputId = null;
-    if (us.channelId && allowedIds.includes(us.channelId)) {
-      inputId = us.channelId;
-      setGlobalChannelId(inputId);
-    } else {
-      inputId = allowedIds[0];
-      if (!us.channelId || !allowedIds.includes(us.channelId)) {
-        updateUserSettings(ctx.from?.id, { channelId: inputId });
+    const s = getUserSettings(ctx.from.id);
+    const k = Math.max(1, Number(s?.k) || 1);
+    const type = s?.type || null;
+
+    requireEnvOrWarn('YOUTUBE_API_KEY', ctx);
+    const waitMsg = await ctx.reply('Получаю последние видео…');
+    const typingTimer = setInterval(() => { ctx.api.sendChatAction(ctx.chat.id, 'typing').catch(() => {}); }, 4500);
+    try {
+      const input = s?.channelId || env.YOUTUBE_CHANNEL_ID;
+      const items = await fetchLatestVideos({ input, limit: k, type });
+
+      if (!items.length) {
+        clearInterval(typingTimer);
+        try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Видео не найдены.'); } catch {}
+        await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
+        return;
       }
-      setGlobalChannelId(inputId);
+      for (const [i, v] of items.entries()) {
+        const text = formatLatestItem({ ...v, index: i + 1 });
+        const parts = splitTextByLimit(text, 3800);
+        for (const p of parts) {
+          await ctx.reply(p);
+          await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0));
+        }
+      }
+      clearInterval(typingTimer);
+      try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Готово.'); } catch {}
+      await ctx.reply(`Готово. Показано ${items.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
+    } catch (err) {
+      clearInterval(typingTimer);
+      try { await ctx.api.editMessageText(ctx.chat.id, waitMsg.message_id, 'Ошибка'); } catch {}
+      const logLatest = getLoggerCtx(ctx, { action: 'latest' });
+      logLatest.error({ err: err?.message || err }, 'Ошибка /latest');
+      await ctx.reply(`Ошибка: ${err?.message || err}`);
+      await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
     }
-    let typeFilter = us.type || null;
-    const limitK = Math.max(1, Number(us.k) || 1);
-    logLatest.info({ channelId: inputId, k: limitK, type: typeFilter }, `Запрос последних видео: channel=${inputId} k=${limitK} type=${typeFilter || 'none'}`);
-    const videos = await fetchLatestVideos({ input: inputId, limit: limitK, type: typeFilter });
-    if (!videos.length) { await ctx.reply('Видео не найдены.'); return; }
-    for (const item of videos.map(v => formatLatestItem(v))) {
-      const parts = splitTextByLimit(item, 3800);
-      for (const p of parts) { await ctx.reply(p); await sleep(Number(env.TELEGRAM_SEND_DELAY_MS || 0)); }
-    }
-    // Показать клавиатуру после вывода последних видео
-    await ctx.reply(`Готово. Показано ${videos.length} видео. ${defaultMessage}`, { reply_markup: buildMainKeyboard() });
   });
 
-  // Обработчик текстового ввода после кнопки "Поиск"
+  // Обработчик ввода текста
   bot.on('message:text', async (ctx, next) => {
     const state = getPendingInput(ctx.from.id);
+    // Вне режима ожидания ввода пробрасываем дальше к другим хендлерам
     if (!state) return next();
 
     if (state.mode === 'search') {
       const raw = (ctx.message?.text || '').trim();
-
       // Поддержка отмены из клавиатуры во время ожидания ввода
       if (raw.toLowerCase() === 'отмена') {
         clearPendingInput(ctx.from.id);
@@ -212,6 +197,22 @@ async function main() {
 
     await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
   });
+  // Дублирующий хендлер без эмодзи для клиентов, присылающих только текст
+  bot.hears('Настройки', async (ctx) => {
+    const userId = ctx.from?.id;
+    let s = getUserSettings(userId);
+    const channels = await getAdminChannels();
+    if (!s.channelId && channels.length) { s = updateUserSettings(userId, { channelId: channels[0].id }); setGlobalChannelId(channels[0].id); }
+
+    const text = [
+      'Настройки пользователя:',
+      `Тип выдачи: ${s.type || 'не задан'}`,
+      `k: ${s.k}`,
+      `score: ${s.showScore ? 'показывать' : 'скрывать'}`,
+    ].join('\n');
+
+    await ctx.reply(text, { reply_markup: buildSettingsKeyboard(s, channels) });
+  });
 
   // Кнопка: Помощь — вывести описание и вернуть клавиатуру
   bot.hears('ℹ️ Помощь', async (ctx) => {
@@ -223,6 +224,18 @@ async function main() {
       '• "ℹ️ Помощь" — краткая справка.',
       '• "Отмена" — сброс ожидаемого ввода.',
       '\nПодсказка: k настраивается кнопками в ⚙️ Настройках; максимум ограничен SEARCH_MAX_K.'
+    ].join('\n'), { reply_markup: buildMainKeyboard() });
+  });
+  // Дублирующий хендлер без эмодзи
+  bot.hears('Помощь', async (ctx) => {
+    await ctx.reply([
+      'Как пользоваться ботом через клавиатуру:',
+      '• "Поиск" — введите запрос; количество результатов (k) берётся из Настроек.',
+      '• "Последние" — показывает последние k видео выбранного канала.',
+      '• "Настройки" — настройка типа выдачи, k и канала.',
+      '• "Помощь" — краткая справка.',
+      '• "Отмена" — сброс ожидаемого ввода.',
+      '\nПодсказка: k настраивается кнопками в Настройках; максимум ограничен SEARCH_MAX_K.'
     ].join('\n'), { reply_markup: buildMainKeyboard() });
   });
 
@@ -269,35 +282,14 @@ async function main() {
   bot.command("admin", async (ctx) => {
     const isAdmin = env.ADMIN_USER_ID ? String(ctx.from?.id) === String(env.ADMIN_USER_ID) : false;
     if (!isAdmin) {
-      return; // Ничего не показываем для не-админов
+      return;
     }
-
-    const adminHelp = [
-      'Админ-команды (запуск служебных скриптов):',
-      '• /lock_status [name] — показать статус блокировок.',
-      '• /lock_force [name] [--force] — принудительно снять блокировку.',
-      '• /channel_stats [@handle|channelId] — статистика по каналам (LanceDB).',
-      '• /channel_count [@handle|channelId] — количество видео в канале.',
-      '• /channel_db_list — список таблиц в LanceDB.',
-      '• /channel_db_delete <@handle|channelId> --yes — удалить таблицу канала.',
-      '• /check_youtube [@handle|channelId] — проверка YouTube API.',
-      '• /index_latest [@handle|channelId] — индексировать последние 10 видео.',
-      '• /index_batch [@handle|channelId] [--limit N] [--stop-on-first-known on|off] — массовая индексация.',
-      '• /preview_latest — предпросмотр последних 10 видео (только .env).',
-      '• /search_latest <query> — тест семантического поиска.',
-      '• /env_check — проверка окружения.',
-      '',
-      'Примеры:',
-      '• /index_latest @handle',
-      '• /index_batch @handle --limit 100 --stop-on-first-known on',
-      '• /channel_db_delete @handle --yes',
-    ].join('\n');
-
+    const adminHelp = buildAdminHelpText();
     await ctx.reply(adminHelp);
   });
 
   // Catch‑all: только неизвестные сообщения вне режима ввода — показать основное меню
-  const knownButtons = new Set(['🔎 Поиск', '🆕 Последние', '⚙️ Настройки', 'ℹ️ Помощь', 'Отмена']);
+  const knownButtons = new Set(['🔎 Поиск', '🆕 Последние', '⚙️ Настройки', 'ℹ️ Помощь', 'Отмена', 'Настройки', 'Помощь']);
   bot.on('message', async (ctx) => {
     const txt = ctx.message?.text;
     if (typeof txt === 'string' && knownButtons.has(txt)) return;
