@@ -7,6 +7,8 @@ const { toVideoEntity } = require("../services/youtube/video");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
 const { embedTexts } = require("../services/embeddings");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
+// NEW: admin notifier for progress updates
+const { notifyAdminProgress, canNotify, fmtEta } = require("../services/admin/notifier");
 
 
 
@@ -34,6 +36,14 @@ function parseBooleanArg(flag, defaultVal = false) {
   if (["1","true","yes","on"].includes(v)) return true;
   if (["0","false","no","off"].includes(v)) return false;
   return true;
+}
+
+// NEW: parse number flag from CLI
+function parseNumberArg(flag, defaultVal) {
+  const idx = process.argv.findIndex(a => a === flag);
+  if (idx < 0) return defaultVal;
+  const v = Number(process.argv[idx + 1]);
+  return Number.isFinite(v) && v > 0 ? v : defaultVal;
 }
 
 // Updated: support early stop at first known videoId
@@ -65,6 +75,11 @@ async function main() {
   let lockAcquired = false;
   try {
     const limit = parseLimitArg(100);
+    // NEW: progress flags and timers
+    const progressEnabled = parseBooleanArg("--progress", canNotify());
+    const progressEvery = parseNumberArg("--progress-every", Number(env.INDEX_PROGRESS_EVERY) || 100);
+    const tStart = Date.now();
+
     if (!env.YOUTUBE_API_KEY) {
       logger.error("YOUTUBE_API_KEY отсутствует. Заполните .env и повторите.");
       process.exit(1);
@@ -94,6 +109,12 @@ async function main() {
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
     const channelId = useArg ? await resolveChannelId(inputArg, client) : inputEnv;
 
+    // NEW: helper to notify admin with bound channelId
+    const notify = (meta) => {
+      if (!progressEnabled) return Promise.resolve();
+      return notifyAdminProgress({ ...meta, channelId, limit }).catch(() => {});
+    };
+
     // Read existing IDs once, before paginating, to enable early stop
     await updateLockMeta('indexing', { stage: 'read_existing', channelId });
     const { table } = await openChannelTableIfExists(channelId);
@@ -118,6 +139,8 @@ async function main() {
     const uploadsId = await getUploadsPlaylistId(channelId, client);
     const { ids: toProcessIds, stoppedEarly } = await collectVideoIds(uploadsId, client, limit, { existingSet: existing, stopOnFirstKnown });
     await updateLockMeta('indexing', { stage: 'collect_ids', total: toProcessIds.length, current: 0, stopped_early: stoppedEarly });
+    // NEW: notify admin about collected IDs
+    notify({ stage: 'collect_ids', total: toProcessIds.length, current: 0, stoppedEarly });
     if (stoppedEarly) {
       logger.info("Пагинация остановлена на первом известном videoId (инкрементальный режим)");
     }
@@ -128,6 +151,8 @@ async function main() {
     if (!newIds.length) {
       await updateLockMeta('indexing', { stage: 'done', total: 0, current: 0 });
       logger.info("Все выбранные видео уже проиндексированы. Нечего добавлять.");
+      // NEW: notify admin finish when nothing to add
+      notify({ stage: 'done', total: 0, current: 0, inserted: 0 });
       return;
     }
 
@@ -141,7 +166,12 @@ async function main() {
       const chunk = batches[i];
       const part = await getVideosDetails(chunk, client);
       details.push(...part);
-      await updateLockMeta('indexing', { stage: 'fetch_details', current: Math.min((i + 1) * 50, newIds.length) });
+      const cur = Math.min((i + 1) * 50, newIds.length);
+      await updateLockMeta('indexing', { stage: 'fetch_details', current: cur });
+      // NEW: notify progress on fetching details
+      if ((cur % Math.max(progressEvery, 50) === 0) || cur === newIds.length) {
+        notify({ stage: 'fetch_details', total: newIds.length, current: cur });
+      }
     }
 
     await updateLockMeta('indexing', { stage: 'normalize', total: details.length });
@@ -165,12 +195,16 @@ async function main() {
     await updateLockMeta('indexing', { stage: 'embedding', total: docsMeta.length, current: 0 });
     const vectors = await embedTexts(docsMeta.map(d => `${d.title}\n\n${d.description_indexed}`));
     await updateLockMeta('indexing', { stage: 'embedding', current: docsMeta.length });
+    // Notify end of embedding
+    await notify({ stage: 'embedding', total: docsMeta.length, current: docsMeta.length });
 
     const docs = docsMeta.map((d, i) => ({ ...d, vector: vectors[i] }));
 
     // Insert in smaller chunks with simple retry for stability
     const maxInsertAttempts = 3;
     let inserted = 0;
+    // NEW: start timestamp for ETA
+    const insertStart = Date.now();
     for (let i = 0; i < docs.length; i += 100) {
       const chunk = docs.slice(i, i + 100);
       let success = false;
@@ -190,11 +224,20 @@ async function main() {
         continue;
       }
       inserted += chunk.length;
-      await updateLockMeta('indexing', { stage: 'insert', current: Math.min(i + chunk.length, docs.length) });
+      const processed = Math.min(i + chunk.length, docs.length);
+      await updateLockMeta('indexing', { stage: 'insert', current: processed });
+      // Notify progress with ETA every N items (skip final to avoid duplicate with 'done')
+      if ((processed % progressEvery === 0) && processed !== docs.length) {
+        const elapsed = Date.now() - insertStart;
+        const etaMs = processed ? Math.max(0, Math.round(elapsed * (docs.length - processed) / processed)) : null;
+        notify({ stage: 'insert', total: docs.length, current: processed, inserted, etaMs });
+      }
     }
     logger.info({ channelId, inserted }, "Добавлены новые документы в таблицу канала");
 
     await updateLockMeta('indexing', { stage: 'done' });
+    // Final notify (await to preserve order)
+    await notify({ stage: 'done', total: docs.length, current: docs.length, inserted });
     logger.info("Батч‑индексация завершена успешно.");
   } catch (err) {
     const data = err?.response?.data;
