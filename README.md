@@ -27,12 +27,12 @@
 - `YOUTUBE_CHANNELS_ID` — список каналов, доступных пользователям в боте; CSV или `|` (например: `@my,UCabc123|https://youtube.com/@other`).
 
 Эмбеддинги (переключаемый провайдер):
-- `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`, `ollama` (локальный доступ к модели). По умолчанию `xenova`.
+- `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`, `embeddinggemma` (локальный доступ к модели через Ollama). По умолчанию `xenova`.
 - `EMBEDDINGS_PROVIDER_CHAIN` — цепочка фоллбэков через `,` или `|` (например: `mistral,xenova`).
 - `MISTRAL_API_KEY` — ключ Mistral (если `EMBEDDINGS_PROVIDER=mistral`).
 - `OPENAI_API_KEY` — ключ OpenAI (если `EMBEDDINGS_PROVIDER=openai`).
 - `OLLAMA_BASE_URL` — базовый URL локального сервера Ollama (по умолчанию `http://localhost:11434`).
-- `OLLAMA_MODEL` — имя модели для эмбеддингов в Ollama (по умолчанию `embeddinggemma`). Важно: Ollama — это проводник, модель — EmbeddingGemma; при `EMBEDDINGS_PROVIDER=ollama` мы используем EmbeddingGemma.
+- `OLLAMA_MODEL` — имя модели для эмбеддингов в локальном транспорте Ollama (по умолчанию `embeddinggemma`). Важно: Ollama — это проводник, модель — EmbeddingGemma; используйте `EMBEDDINGS_PROVIDER=embeddinggemma`.
 - Параметры устойчивости: `EMBEDDINGS_MAX_CONCURRENCY` (по умолчанию `1`), `EMBEDDINGS_BATCH_SIZE` (по умолчанию `8`), `EMBEDDINGS_MAX_ATTЕМPTS` (по умолчанию `5`), `EMBEDDINGS_TIMEOUT_MS` (по умолчанию `30000`).
 
 Очистка описаний и вывод:
@@ -162,7 +162,7 @@
 
 ## Примечания
 - Эмбеддинги облачных провайдеров платные — индексация больших объёмов требует бюджета; включено кэширование и фоллбэки провайдеров.
-- Ollama — локальный проводник к модели; при желании модель можно запустить без Ollama, но сейчас используем Ollama для удобного локального доступа к EmbeddingGemma.
+- Ollama — локальный транспорт к EmbeddingGemma; не является провайдером. Для эмбеддингов используйте `EMBEDDINGS_PROVIDER=embeddinggemma`.
 - В `.gitignore` исключены `data/` и `.env` — храните ключи локально.
 - Формат очистки описаний полностью управляется `.env` и единообразен в скриптах и боте.
 

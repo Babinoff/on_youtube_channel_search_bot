@@ -152,7 +152,7 @@ async function embedTexts(texts) {
     if (final) embeddingsCache.set(t, final);
   }
 
-  logger.info({ provider: "ollama", dims: results[0]?.length }, "Эмбеддинги получены (Ollama)");
+  logger.info({ provider: String(env.EMBEDDINGS_PROVIDER || 'embeddinggemma'), dims: results[0]?.length }, "Эмбеддинги получены (Ollama)");
   return results;
 }
 

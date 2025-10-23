@@ -139,7 +139,7 @@ function validateEnv() {
 
   // Embeddings provider sanity
   const provider = String(env.EMBEDDINGS_PROVIDER || "").toLowerCase();
-  const knownProviders = ["xenova", "mistral", "openai", "google", "ollama"];
+  const knownProviders = ["xenova", "mistral", "openai", "google", "embeddinggemma"];
   if (provider && !knownProviders.includes(provider)) {
     warnings.push(`Неизвестный EMBEDDINGS_PROVIDER: ${env.EMBEDDINGS_PROVIDER} (известные: ${knownProviders.join(", ")})`);
   }

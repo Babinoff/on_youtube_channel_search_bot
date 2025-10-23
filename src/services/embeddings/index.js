@@ -24,7 +24,7 @@ function loadProvider(name) {
     case "openai":
       return tryRequire("./openai");
     case "embeddinggemma":
-      return tryRequire("./embeddinggemma");
+      return tryRequire("./ollama");
     default:
       return null;
   }

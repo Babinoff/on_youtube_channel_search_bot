@@ -18,13 +18,13 @@ function providerModel(name) {
   const p = String(name || '').toLowerCase();
   switch (p) {
     case 'xenova':
-      return process.env.EMBEDDINGS_XENOVA_MODEL || 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
+      return 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
     case 'google':
-      return env.EMBEDDINGS_MODEL_ID || 'text-embedding-004';
+      return 'text-embedding-004';
     case 'mistral':
       return 'mistral-embed';
     case 'openai':
-      return env.EMBEDDINGS_MODEL_ID || 'text-embedding-3-large';
+      return 'text-embedding-3-large';
     case 'embeddinggemma':
       return env.OLLAMA_MODEL || 'embeddinggemma';
     default:
@@ -34,7 +34,12 @@ function providerModel(name) {
 
 async function testProvider(name, sampleText) {
   let mod = null;
-  try { mod = require(`../services/embeddings/${name}`); } catch (_) {}
+  const known = ['mistral', 'xenova', 'google', 'openai', 'embeddinggemma'];
+  if (!known.includes(String(name).toLowerCase())) {
+    return { name, ok: false, reason: 'неизвестный провайдер' };
+  }
+  const moduleName = name === 'embeddinggemma' ? 'ollama' : name;
+  try { mod = require(`../services/embeddings/${moduleName}`); } catch (_) {}
   if (!mod || typeof mod.embedTexts !== 'function') {
     const reason = 'модуль провайдера отсутствует';
     return { name, ok: false, reason };

@@ -1,10 +1,10 @@
 # EmbeddingGemma (Ollama) — план интеграции
 
-Цель: добавить локальный провайдер эмбеддингов EmbeddingGemma (через Ollama) без ломки текущей архитектуры, с отдельными таблицами на провайдера, используя общие параметры для тюнинга эмбеддингов и рекомендации из документации Gemma.
+Цель: добавить локальный провайдер эмбеддингов `embeddinggemma` (через транспорт Ollama) без ломки текущей архитектуры, с отдельными таблицами на провайдера, используя общие параметры для тюнинга эмбеддингов и рекомендации из документации Gemма.
 
 ## Принципы архитектуры
 - Не изменяем общие настройки: используем существующие переменные окружения для эмбеддингов (`EMBEDDINGS_MAX_CONCURRENCY`, `EMBEDDINGS_CACHE_SIZE`, `EMBEDDINGS_BATCH_SIZE`, `EMBEDDINGS_MAX_ATTEMPTS`, `EMBEDDINGS_TIMEOUT_MS`, `EMBEDDINGS_MAX_CHUNK_LEN`, `EMBEDDINGS_CHUNK_OVERLAP`).
-- Каждый провайдер пишет в свою таблицу: `video_embeddings_<provider>_<channelId>` (LanceDB). Для Ollama будет `video_embeddings_ollama_<channelId>` — миграции не требуются.
+- Каждый провайдер пишет в свою таблицу: `video_embeddings_<provider>_<channelId>` (LanceDB). Для `embeddinggemma` будет `video_embeddings_embeddinggemma_<channelId>` — миграции не требуются.
 - Провайдеры могут иметь разные размерности (dims); поиск и индексация всегда смотрят на таблицу провайдера из `env.EMBEDDINGS_PROVIDER`.
 - Цепочка провайдеров поддерживается существующим механизмом `EMBEDDINGS_PROVIDER_CHAIN`; в дальнейшем каждый провайдер работает с «своими» базами.
 - Метрика/порог: используем `cosine_distance`, верхняя граница для адаптивного порога — провайдер-специфична (по умолчанию 2).
@@ -31,14 +31,14 @@
 
 ### 1) Регистрация провайдера
 - `src/services/embeddings/index.js`:
-  - Добавить кейс: `case "ollama": return tryRequire("./ollama");`
-  - Расширить `providerMeta`: `ollama: { metric: 'cosine_distance', distanceMax: 2 }`.
+  - Для провайдера `embeddinggemma` используем транспортный модуль: `case "embeddinggemma": return tryRequire("./ollama");`
+  - Метаданные провайдера: `embeddinggemma: { metric: 'cosine_distance', distanceMax: 2 }`.
 
 - `src/config/env.js`:
-  - В список известных провайдеров добавить `"ollama"` для валидации.
-  - (Опционально) варнинг, если `EMBEDDINGS_PROVIDER=ollama` и локальный сервер недоступен (проверка не обязательна, можно оставить диагностику на уровне провайдера).
+  - Убедиться, что `knownProviders` содержит `"embeddinggemma"` и не содержит `"ollama"`.
+  - (Опционально) варнинг, если локальный транспорт Ollama недоступен — диагностику оставляем на уровне провайдера.
 
-### 2) Новый провайдер `src/services/embeddings/ollama.js`
+### 2) Транспорт EmbeddingGemma: `src/services/embeddings/ollama.js`
 Интерфейс: `async function embedTexts(texts)` → возвращает массив векторов по числу входных текстов.
 
 Реализация:
@@ -62,12 +62,12 @@
 
 ### 3) Диагностика
 - `src/scripts/emb_status.js`:
-  - В `providerModel(name)` добавить кейс `ollama`: возвращать `'embeddinggemma'`.
-  - Скрипт уже умеет тестировать провайдеры, достаточно чтобы модуль существовал.
+  - В `providerModel(name)` для `embeddinggemma` возвращать `env.OLLAMA_MODEL` (по умолчанию `'embeddinggemma'`).
+  - Скрипт тестирует только известные провайдеры; `'ollama'` не является провайдером.
 
 ## Потоки индексации и поиска
 - Индексация (`index:test`, `index:batch`):
-  - При `EMBEDDINGS_PROVIDER=ollama` создаётся таблица `video_embeddings_ollama_<channelId>`.
+  - При `EMBEDDINGS_PROVIDER=embeddinggemma` создаётся таблица `video_embeddings_embeddinggemma_<channelId>`.
   - Разные провайдеры создают разные таблицы — миграции не нужны.
 - Поиск:
   - Всегда вычисляет эмбеддинг запроса текущим провайдером.
@@ -76,17 +76,17 @@
 
 ## Порядок выполнения
 1. Установить Ollama и `pull embeddinggemma`; убедиться что API доступен локально.
-2. Добавить провайдера `ollama` в `embeddings/index.js` и `providerMeta`.
-3. Добавить `ollama` в список известных провайдеров в `env.js`.
+2. Переназначить провайдера `embeddinggemma` на транспортный модуль `ollama` и обновить `providerMeta`.
+3. Проверить, что `embeddinggemma` есть в списке известных провайдеров (`env.js`); `ollama` не добавлять.
 4. Реализовать `src/services/embeddings/ollama.js` по описанию выше.
 5. Обновить `emb_status.js` для отображения модели провайдера.
-6. Заполнить `.env` только общими параметрами эмбеддингов; установить `EMBEDDINGS_PROVIDER=ollama`.
+6. Заполнить `.env` только общими параметрами эмбеддингов; установить `EMBEDDINGS_PROVIDER=embeddinggemma`.
 7. Запустить индексацию (`npm run index:test` или `npm run index:batch`) — создаст провайдер-специфичные таблицы.
 8. Проверить `/emb_status` и `npm run search:test` — убедиться в валидной размерности и релевантности.
 
 ## Критерии готовности
 - `emb_status` показывает валидную размерность (dims > 0), норму (не NaN), время ответа.
-- В LanceDB появились таблицы `video_embeddings_ollama_<channelId>` с новыми векторами.
+- В LanceDB появились таблицы `video_embeddings_embeddinggemma_<channelId>` с новыми векторами.
 - Поиск выдаёт корректные результаты, адаптивный порог логируется, ошибки отсутствуют.
 - CI-тесты проходят без регрессий.
 

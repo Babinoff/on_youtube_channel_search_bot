@@ -488,7 +488,7 @@ function applyAdminCommands(bot) {
       case 'openai':
         model = env.EMBEDDINGS_MODEL_ID || 'text-embedding-3-large';
         break;
-      case 'ollama':
+      case 'embeddinggemma':
         model = env.OLLAMA_MODEL || 'embeddinggemma';
         break;
       default:
