@@ -26,6 +26,7 @@ const ADMIN_COMMANDS = [
   { name: "search_latest", usage: "/search_latest <query>", description: "тестовый поиск по тестовой таблице." },
   { name: "env_check", usage: "/env_check", description: "сводка и валидация окружения." },
   { name: "emb_status", usage: "/emb_status", description: "статус провайдера эмбеддингов и размерность." },
+  { name: "emb_model", usage: "/emb_model", description: "текущая модель эмбеддингов (провайдер и модель)." },
 ];
 
 function buildAdminHelpText() {
@@ -33,7 +34,7 @@ function buildAdminHelpText() {
     { title: 'Управление каналами', cmds: ['list_channels', 'add_channel', 'active_channel', 'set_channel', 'channel_db_list', 'channel_db_delete', 'channel_stats', 'channel_db_stats'] },
     { title: 'Индексация и превью', cmds: ['index_latest', 'index_batch', 'check_youtube', 'preview_latest'] },
     { title: 'Блокировки', cmds: ['lock_status', 'lock_force'] },
-    { title: 'Окружение и эмбеддинги', cmds: ['env_check', 'emb_status'] },
+    { title: 'Окружение и эмбеддинги', cmds: ['env_check', 'emb_status', 'emb_model'] },
   ];
 
   const byName = new Map(ADMIN_COMMANDS.map(c => [c.name, c]));
@@ -465,6 +466,42 @@ function applyAdminCommands(bot) {
     if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: emb_status");
     const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка emb_status (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
     await replySplit(ctx, text);
+  });
+
+  // emb_model
+  bot.command("emb_model", async (ctx) => {
+    if (!(await ensureAdmin(ctx))) return;
+    const log = getLoggerCtx(ctx, { area: "admin", cmd: "emb_model" });
+    log.info("Вызов admin-команды: emb_model");
+    const provider = String(env.EMBEDDINGS_PROVIDER || '').toLowerCase();
+    let model;
+    switch (provider) {
+      case 'xenova':
+        model = process.env.EMBEDDINGS_XENOVA_MODEL || 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
+        break;
+      case 'google':
+        model = env.EMBEDDINGS_MODEL_ID || 'text-embedding-004';
+        break;
+      case 'mistral':
+        model = 'mistral-embed';
+        break;
+      case 'openai':
+        model = env.EMBEDDINGS_MODEL_ID || 'text-embedding-3-large';
+        break;
+      case 'ollama':
+        model = env.OLLAMA_MODEL || 'embeddinggemma';
+        break;
+      default:
+        model = '(unknown)';
+        break;
+    }
+    const chain = env.EMBEDDINGS_PROVIDER_CHAIN || '';
+    const text = [
+      `Текущая модель эмбеддингов: ${model}`,
+      `Провайдер: ${provider || '(not set)'}`,
+      chain ? `Цепочка фоллбэков: ${chain}` : null,
+    ].filter(Boolean).join('\n');
+    await ctx.reply(text);
   });
 }
 

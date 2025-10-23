@@ -62,6 +62,10 @@ const env = {
   LANCEDB_DIR: process.env.LANCEDB_DIR || "./data/lancedb",
   DATABASE_URL: process.env.DATABASE_URL || "./data/db.sqlite",
 
+  // Ollama local provider
+  OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+  OLLAMA_MODEL: process.env.OLLAMA_MODEL || "embeddinggemma",
+
   // Embeddings provider tuning
   EMBEDDINGS_MAX_CONCURRENCY: Number(process.env.EMBEDDINGS_MAX_CONCURRENCY || 1),
   EMBEDDINGS_CACHE_SIZE: Number(process.env.EMBEDDINGS_CACHE_SIZE || 200),
@@ -135,7 +139,7 @@ function validateEnv() {
 
   // Embeddings provider sanity
   const provider = String(env.EMBEDDINGS_PROVIDER || "").toLowerCase();
-  const knownProviders = ["xenova", "mistral", "openai", "google"];
+  const knownProviders = ["xenova", "mistral", "openai", "google", "ollama"];
   if (provider && !knownProviders.includes(provider)) {
     warnings.push(`Неизвестный EMBEDDINGS_PROVIDER: ${env.EMBEDDINGS_PROVIDER} (известные: ${knownProviders.join(", ")})`);
   }

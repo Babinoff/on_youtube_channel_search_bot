@@ -27,11 +27,13 @@
 - `YOUTUBE_CHANNELS_ID` — список каналов, доступных пользователям в боте; CSV или `|` (например: `@my,UCabc123|https://youtube.com/@other`).
 
 Эмбеддинги (переключаемый провайдер):
-- `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`. По умолчанию `xenova`.
+- `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`, `ollama` (локальный доступ к модели). По умолчанию `xenova`.
 - `EMBEDDINGS_PROVIDER_CHAIN` — цепочка фоллбэков через `,` или `|` (например: `mistral,xenova`).
 - `MISTRAL_API_KEY` — ключ Mistral (если `EMBEDDINGS_PROVIDER=mistral`).
 - `OPENAI_API_KEY` — ключ OpenAI (если `EMBEDDINGS_PROVIDER=openai`).
-- Параметры устойчивости: `EMBEDDINGS_MAX_CONCURRENCY` (по умолчанию `1`), `EMBEDDINGS_BATCH_SIZE` (по умолчанию `8`), `EMBEDDINGS_MAX_ATTEMPTS` (по умолчанию `5`), `EMBEDDINGS_TIMEOUT_MS` (по умолчанию `30000`).
+- `OLLAMA_BASE_URL` — базовый URL локального сервера Ollama (по умолчанию `http://localhost:11434`).
+- `OLLAMA_MODEL` — имя модели для эмбеддингов в Ollama (по умолчанию `embeddinggemma`). Важно: Ollama — это проводник, модель — EmbeddingGemma; при `EMBEDDINGS_PROVIDER=ollama` мы используем EmbeddingGemma.
+- Параметры устойчивости: `EMBEDDINGS_MAX_CONCURRENCY` (по умолчанию `1`), `EMBEDDINGS_BATCH_SIZE` (по умолчанию `8`), `EMBEDDINGS_MAX_ATTЕМPTS` (по умолчанию `5`), `EMBEDDINGS_TIMEOUT_MS` (по умолчанию `30000`).
 
 Очистка описаний и вывод:
 - `DESC_MAX_CHARS` — единый лимит длины описания для `/latest` и индексации (по умолчанию `500`).
@@ -80,17 +82,22 @@
 Доступны только пользователю с `ADMIN_USER_ID`:
 - /lock_status [name] — показать статус блокировок.
 - /lock_force [name] [--force] — принудительно снять блокировку.
+- /list_channels — показать все подключённые каналы (env и серверные).
+- /add_channel <@хэндл|channelId> — добавить новый канал в серверные настройки.
+- /active_channel — показать текущий активный канал.
+- /set_channel <@хэндл|channelId> — сменить активный канал.
 - /channel_db_list — список таблиц каналов в LanceDB.
-- /channel_db_delete <@хэндл YouTube-канала|channelId> --yes — удалить таблицу канала в LanceDB.
-- /channel_stats [@хэндл YouTube-канала|channelId] — сводная статистика индексации по каналу.
-- /channel_db_stats [@хэндл YouTube-канала|channelId] — статистика по LanceDB для канала (без запросов в YouTube).
-- /check_youtube [@хэндл YouTube-канала|channelId] — проверка YouTube API: резолв канала и первые videoId.
-- /index_latest [@хэндл YouTube-канала|channelId] — индексировать последние 10 видео канала.
-- /index_batch [@хэндл YouTube-канала|channelId] [--limit N] [--stop-on-first-known on|off] — массовая индексация с лимитом и остановом на первом известном.
+- /channel_db_delete --yes — удалить таблицу активного канала в LanceDB.
+- /channel_stats — сводная статистика индексации активного канала.
+- /channel_db_stats — статистика по LanceDB для активного канала (без запросов в YouTube).
+- /check_youtube — проверка YouTube API для активного канала.
+- /index_latest — индексировать последние 10 видео активного канала.
+- /index_batch [--limit N] [--stop-on-first-known on|off] — массовая индексация активного канала.
 - /preview_latest — предпросмотр очистки последних 10 видео по .env.
 - /search_latest <query> — тестовый поиск по тестовой таблице.
 - /env_check — сводка и валидация окружения.
 - /emb_status — статус провайдера эмбеддингов и размерность.
+- /emb_model — текущая модель эмбеддингов (провайдер и модель).
 
 ## Скрипты (CLI)
 Все команды запускаются через `npm run <script> -- [аргументы]`.
@@ -155,6 +162,7 @@
 
 ## Примечания
 - Эмбеддинги облачных провайдеров платные — индексация больших объёмов требует бюджета; включено кэширование и фоллбэки провайдеров.
+- Ollama — локальный проводник к модели; при желании модель можно запустить без Ollama, но сейчас используем Ollama для удобного локального доступа к EmbeddingGemma.
 - В `.gitignore` исключены `data/` и `.env` — храните ключи локально.
 - Формат очистки описаний полностью управляется `.env` и единообразен в скриптах и боте.
 

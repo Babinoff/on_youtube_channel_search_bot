@@ -25,6 +25,8 @@ function providerModel(name) {
       return 'mistral-embed';
     case 'openai':
       return env.EMBEDDINGS_MODEL_ID || 'text-embedding-3-large';
+    case 'embeddinggemma':
+      return env.OLLAMA_MODEL || 'embeddinggemma';
     default:
       return '(unknown)';
   }

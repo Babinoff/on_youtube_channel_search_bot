@@ -23,6 +23,8 @@ function loadProvider(name) {
       return tryRequire("./google");
     case "openai":
       return tryRequire("./openai");
+    case "embeddinggemma":
+      return tryRequire("./embeddinggemma");
     default:
       return null;
   }
@@ -43,6 +45,7 @@ const providerMeta = {
   mistral: { metric: 'cosine_distance', distanceMax: 2 },
   openai: { metric: 'cosine_distance', distanceMax: 2 },
   google: { metric: 'cosine_distance', distanceMax: 2 },
+  embeddinggemma: { metric: 'cosine_distance', distanceMax: 2 },
 };
 
 function getProviderDistanceMax(chainInput) {
