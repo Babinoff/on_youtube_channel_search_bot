@@ -11,6 +11,7 @@ function applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName }) {
     ? arr.filter((r) => (r.type || 'video') === typeFilter)
     : arr;
 
+  // Базовая фильтрация по стартовому порогу
   const initialFiltered = rowsTypeFiltered.filter((r) => {
     if (hasDistanceKey) {
       const d = r._distance ?? r.distance;
@@ -27,7 +28,9 @@ function applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName }) {
 
   let finalRows = initialFiltered.slice(0, k);
 
-  if (!finalRows.length && rowsTypeFiltered.length) {
+  // Новая логика: расширять порог, пока не наберём хотя бы k результатов
+  const needAdapt = rowsTypeFiltered.length && finalRows.length < k;
+  if (needAdapt) {
     const boundMax = getProviderDistanceMax();
     const iters = Number(env.SEARCH_ADAPTIVE_ITERS || 3);
     const step = Number(env.SEARCH_ADAPTIVE_STEP || 0.1);
@@ -56,11 +59,12 @@ function applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName }) {
 
       finalRows = adapted.slice(0, k);
       curMax = nextMax;
-      if (finalRows.length) break;
-      if (curMax >= boundMax) break;
+      if (finalRows.length >= k) break; // достаточно результатов
+      if (curMax >= boundMax) break;    // достигли максимума провайдера
     }
 
-    if (!finalRows.length) {
+    // Fallback: если всё ещё меньше k — просто вернуть top‑k без порога
+    if (finalRows.length < k) {
       finalRows = rowsTypeFiltered.slice(0, k);
     }
   }

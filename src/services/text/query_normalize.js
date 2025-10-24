@@ -72,8 +72,24 @@ function normalizeQueryText(raw) {
   const cleaned = normalizeChars(raw);
   if (!cleaned) return '';
   const tokens = cleaned.split(' ').filter(Boolean);
+
+  // Если токен смешивает латиницу и кириллицу, приводим
+  // визуально похожие кириллические символы к латинице.
+  // Это исправляет случаи типа "Vampirе" (кириллическая "е").
+  function normalizeHomoglyphsIfMixed(token) {
+    const t = String(token || '');
+    const hasLat = isLatin(t);
+    const hasCyr = isCyrillic(t);
+    if (!(hasLat && hasCyr)) return t;
+    const map = {
+      'а':'a','е':'e','о':'o','р':'p','с':'c','у':'y','х':'x','к':'k','м':'m','н':'h','т':'t','в':'v','і':'i'
+    };
+    return t.replace(/[аеорсухкмнтві]/g, ch => map[ch] || ch);
+  }
+
   const out = [];
-  for (const tok of tokens) {
+  for (let tok of tokens) {
+    tok = normalizeHomoglyphsIfMixed(tok);
     if (isCyrillic(tok)) out.push(stemRu(tok));
     else if (isLatin(tok)) out.push(stemEn(tok));
     else out.push(tok);

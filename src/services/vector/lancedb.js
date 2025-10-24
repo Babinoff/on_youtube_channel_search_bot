@@ -185,7 +185,10 @@ async function searchTopK(query, k = 5, opts = {}) {
   }
 
   // Берём больше кандидатов, лимитируем в конце
-  const preLimit = Math.max(k, Number(env.SEARCH_MAX_K || 20));
+  const preLimitEnv = Number(env.SEARCH_PRELIMIT || 0);
+  const preLimitFactor = Number(env.SEARCH_PRELIMIT_FACTOR || 4);
+  const basePreLimit = Math.max(k, Number(env.SEARCH_MAX_K || 20));
+  const preLimit = preLimitEnv > 0 ? preLimitEnv : Math.max(basePreLimit, basePreLimit * preLimitFactor);
   let res;
   if (typeof qb.toArray === 'function') {
     res = await qb.limit(preLimit).toArray();
@@ -201,14 +204,11 @@ async function searchTopK(query, k = 5, opts = {}) {
   const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;
   const finalRows = applyAdaptiveFilter(rows, k, { maxDistance, typeFilter, tableName });
 
-
-
-  logger.info({ tableName, k, count: finalRows.length, maxDistance, typeFilter }, "Поиск LanceDB завершён (лимит применён в конце)");
-
-  // Финальный лог адаптивного порога: итоговое значение, тип метрики, максимум провайдера
+  // Вычислить тип метрики и итоговый адаптивный порог (по фактическим результатам)
   const providerMax = getProviderDistanceMax();
   const hasDistanceKey = finalRows.some(r => typeof r._distance === 'number' || typeof r.distance === 'number');
   const isSimilarityScore = !hasDistanceKey && finalRows.some(r => typeof r.score === 'number');
+
   let finalThreshold = null;
   if (hasDistanceKey) {
     const distances = finalRows
@@ -220,9 +220,133 @@ async function searchTopK(query, k = 5, opts = {}) {
     finalThreshold = scores.length ? (1 - Math.min(...scores)) : null;
   }
   const metricType = hasDistanceKey ? 'distance' : (isSimilarityScore ? 'similarity' : 'unknown');
-  logger.info({ tableName, count: finalRows.length, finalThreshold, metricType, providerMax }, 'Адаптивный поиск: итог');
 
-  return finalRows.map((r, i) => ({
+  // Гибридный буст: реранкинг по точным токенам запроса в title/description
+  const useHybrid = String(env.SEARCH_HYBRID_ENABLE || 'true');
+  let selectedRows = finalRows;
+
+  if (useHybrid) {
+    const tokensWantedArr = (normalizeQueryText(norm || raw) || '')
+      .split(' ')
+      .filter((t) => t && t.length >= 3 && t !== 'the');
+    const tokensWanted = new Set(tokensWantedArr);
+
+    // Отфильтровать весь список кандидатов по финальному порогу
+    const typeFilteredAll = typeFilter ? rows.filter(r => (r.type || 'video') === typeFilter) : rows;
+    let thr = typeof finalThreshold === 'number' ? finalThreshold : (typeof maxDistance === 'number' ? maxDistance : Number(env.SEARCH_MAX_DISTANCE || 0.7));
+
+    let eligible = typeFilteredAll;
+    if (metricType === 'distance') {
+      eligible = typeFilteredAll.filter(r => {
+        const d = typeof r._distance === 'number' ? r._distance : r.distance;
+        return typeof d === 'number' ? d <= thr : true;
+      });
+    } else if (metricType === 'similarity') {
+      const minScore = Math.max(0, Math.min(1, 1 - thr));
+      eligible = typeFilteredAll.filter(r => {
+        const s = r.score;
+        return typeof s === 'number' ? s >= minScore : true;
+      });
+    }
+
+    const titleWeight = Number(env.SEARCH_HYBRID_TITLE_WEIGHT || 3);
+    const descWeight = Number(env.SEARCH_HYBRID_DESC_WEIGHT || 1);
+    const boostFactor = Number(env.SEARCH_HYBRID_FACTOR || 0.5);
+    const recencyEnabled = String(env.SEARCH_RECENCY_ENABLE || 'true');
+    const recencyHalfLifeDays = Number(env.SEARCH_RECENCY_HALF_LIFE_DAYS || 60);
+    const recencyFactor = Number(env.SEARCH_RECENCY_FACTOR || 0.2);
+    const distancePenaltyFactor = Number(env.SEARCH_DISTANCE_PENALTY_FACTOR || 0.3);
+    const providerMaxLocal = getProviderDistanceMax();
+
+    function tokensFromText(text) {
+      const s = normalizeQueryText(String(text || ''));
+      if (!s) return new Set();
+      return new Set(s.split(' ').filter(Boolean));
+    }
+
+    function recencyBoostFrom(publishedAt) {
+      if (!recencyEnabled || recencyEnabled === 'false' || recencyEnabled === '0') return 0;
+      const ts = publishedAt ? new Date(publishedAt).getTime() : 0;
+      if (!ts || !Number.isFinite(ts)) return 0;
+      const ageDays = Math.max(0, (Date.now() - ts) / (1000 * 60 * 60 * 24));
+      const decay = Math.exp(-ageDays / Math.max(1, recencyHalfLifeDays));
+      return decay * Math.max(0, recencyFactor);
+    }
+
+    function distancePenaltyFrom(row) {
+      const d = typeof row._distance === 'number' ? row._distance : row.distance;
+      if (typeof d !== 'number' || !Number.isFinite(d)) return 0;
+      const norm = Math.max(0, Math.min(1, d / Math.max(1, providerMaxLocal)));
+      return norm * Math.max(0, distancePenaltyFactor);
+    }
+
+    const boosted = eligible.map((r, idx) => {
+      const titleTokens = tokensFromText(r.title || r.snippet?.title || '');
+      const descTokens = tokensFromText(r.description_indexed || r.snippet?.description || '');
+
+      let hitsTitle = 0, hitsDesc = 0;
+      for (const t of tokensWanted) {
+        if (titleTokens.has(t)) hitsTitle++;
+        if (descTokens.has(t)) hitsDesc++;
+      }
+      const boostRaw = hitsTitle * titleWeight + hitsDesc * descWeight;
+      const boostTokens = Math.max(0, boostRaw) * Math.max(0, boostFactor);
+      const recency = recencyBoostFrom(r.published_at || r.snippet?.publishedAt || null);
+      const penalty = distancePenaltyFrom(r);
+      const boost = boostTokens + recency - penalty;
+
+      return { r, idx, boost };
+    });
+
+    // Добавить кандидатов с токенными совпадениями вне порога, чтобы не терять точные хиты
+    const idsEligible = new Set(eligible.map(r => r.id));
+    const extras = typeFilteredAll.filter(r => !idsEligible.has(r.id)).map((r, idx) => {
+      const titleTokens = tokensFromText(r.title || r.snippet?.title || '');
+      const descTokens = tokensFromText(r.description_indexed || r.snippet?.description || '');
+      let hitsTitle = 0, hitsDesc = 0;
+      for (const t of tokensWanted) {
+        if (titleTokens.has(t)) hitsTitle++;
+        if (descTokens.has(t)) hitsDesc++;
+      }
+      const hasHits = (hitsTitle + hitsDesc) > 0;
+      if (!hasHits) return null;
+      const boostRaw = hitsTitle * titleWeight + hitsDesc * descWeight;
+      const boostTokens = Math.max(0, boostRaw) * Math.max(0, boostFactor);
+      const recency = recencyBoostFrom(r.published_at || r.snippet?.publishedAt || null);
+      const penalty = distancePenaltyFrom(r);
+      const boost = boostTokens + recency - penalty;
+      return { r, idx, boost };
+    }).filter(Boolean);
+
+    boosted.push(...extras);
+
+    // Реранкинг: сначала буст, затем исходный порядок LanceDB, при равенстве — новизна
+    boosted.sort((a, b) => {
+      const bothNonPositive = (a.boost <= 0 && b.boost <= 0);
+      if (!bothNonPositive && b.boost !== a.boost) return b.boost - a.boost;
+      const at = new Date(a.r.published_at || a.r.snippet?.publishedAt || 0).getTime();
+      const bt = new Date(b.r.published_at || b.r.snippet?.publishedAt || 0).getTime();
+      if (bt !== at) return bt - at; // новее выше
+      return a.idx - b.idx;
+    });
+
+    // Удалить дубликаты по id после объединения списков
+    const seenIds = new Set();
+    const uniq = [];
+    for (const item of boosted) {
+      const id = item?.r?.id;
+      if (id && !seenIds.has(id)) { seenIds.add(id); uniq.push(item); }
+    }
+
+    selectedRows = uniq.slice(0, k).map(x => x.r);
+  }
+
+  logger.info({ tableName, k, count: selectedRows.length, maxDistance, typeFilter }, "Поиск LanceDB завершён (лимит + гибридный буст)");
+
+  // Финальный лог адаптивного порога: итоговое значение, тип метрики, максимум провайдера
+  logger.info({ tableName, count: selectedRows.length, finalThreshold, metricType, providerMax, hybrid: useHybrid }, 'Адаптивный поиск: итог');
+
+  return selectedRows.map((r, i) => ({
     index: i + 1,
     id: r.id,
     title: r.title || r.snippet?.title || "(без названия)",
