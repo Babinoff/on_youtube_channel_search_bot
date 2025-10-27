@@ -11,7 +11,7 @@ const { addChannel, setActiveChannel, getActiveChannelId, getServerSettings } = 
 const ADMIN_COMMANDS = [
   { name: "lock_status", usage: "/lock_status [name]", description: "показать статус блокировок." },
   { name: "lock_force", usage: "/lock_force [name] [--force]", description: "принудительно снять блокировку." },
-  { name: "list_channels", usage: "/list_channels", description: "показать все подключённые каналы (env и серверные)." },
+  { name: "list_channels", usage: "/list_channels", description: "показать все каналы из настроек сервера." },
   { name: "add_channel", usage: "/add_channel <@хэндл|channelId>", description: "добавить новый канал в серверные настройки." },
   { name: "active_channel", usage: "/active_channel", description: "показать текущий активный канал." },
   { name: "set_channel", usage: "/set_channel <@хэндл|channelId>", description: "сменить активный канал." },
@@ -22,7 +22,7 @@ const ADMIN_COMMANDS = [
   { name: "check_youtube", usage: "/check_youtube", description: "проверка YouTube API для активного канала." },
   { name: "index_latest", usage: "/index_latest", description: "индексировать последние 10 видео активного канала." },
   { name: "index_batch", usage: "/index_batch [--limit N] [--stop-on-first-known on|off]", description: "массовая индексация активного канала." },
-  { name: "preview_latest", usage: "/preview_latest", description: "предпросмотр очистки последних 10 видео по .env." },
+  { name: "preview_latest", usage: "/preview_latest", description: "предпросмотр очистки последних 10 видео по активному каналу." },
   { name: "search_latest", usage: "/search_latest <query>", description: "тестовый поиск по тестовой таблице." },
   { name: "env_check", usage: "/env_check", description: "сводка и валидация окружения." },
   { name: "emb_status", usage: "/emb_status", description: "статус провайдера эмбеддингов и размерность." },
@@ -164,8 +164,7 @@ function applyAdminCommands(bot) {
     const lines = list.map((c) => {
       const mark = c.id === activeId ? "[active] " : "";
       const handle = c.handle ? ` (${c.handle})` : "";
-      const src = c.source === "env" ? "env" : "server";
-      return `• ${mark}${c.title}${handle} — ${c.id} [${src}]`;
+      return `• ${mark}${c.title}${handle} — ${c.id}`;
     });
     const text = ["Каналы:", ...lines].join("\n");
     await replySplit(ctx, text);

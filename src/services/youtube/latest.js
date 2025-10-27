@@ -1,6 +1,7 @@
 const { env } = require("../../config/env");
 const client = require("./client");
 const video = require("./video");
+const { getActiveChannelId } = require("../admin/server_settings_store");
 
 function applyOrderingForLatest(mapped, limit, type) {
   const limitN = Math.max(1, Number(limit) || 1);
@@ -10,8 +11,9 @@ function applyOrderingForLatest(mapped, limit, type) {
 
 async function fetchLatestVideos({ input, limit = 10, type = null }) {
   const c = client.createYouTubeClient(env.YOUTUBE_API_KEY);
-  const channelId = input ? (input.match(/^UC/) ? input : await client.resolveChannelId(input, c)) : env.YOUTUBE_CHANNEL_ID;
-  if (!channelId) throw new Error("Не задан канал: добавьте YOUTUBE_CHANNEL_ID в .env или укажите аргумент.");
+  const activeId = await getActiveChannelId();
+  const channelId = input ? (input.match(/^UC/) ? input : await client.resolveChannelId(input, c)) : activeId;
+  if (!channelId) throw new Error("Не задан канал: укажите аргумент или выберите активный канал в settings.json");
 
   const uploadsId = await client.getUploadsPlaylistId(channelId, c);
 

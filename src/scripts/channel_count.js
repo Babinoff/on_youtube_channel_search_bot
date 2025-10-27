@@ -1,19 +1,20 @@
 require("dotenv").config();
 const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos } = require("../services/youtube/client");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 async function main() {
   try {
     const inputArg = process.argv[2];
-    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
     const useArg = Boolean(inputArg);
-    const input = useArg ? inputArg : inputEnv;
+    const activeId = await getActiveChannelId();
+    const input = useArg ? inputArg : activeId;
     if (!env.YOUTUBE_API_KEY) {
       console.error("YOUTUBE_API_KEY отсутствует.");
       process.exit(1);
     }
     if (!input) {
-      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
+      console.error("Укажите канал через аргумент или установите активный канал в settings.json.");
       process.exit(1);
     }
 

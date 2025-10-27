@@ -2,6 +2,7 @@ require('dotenv').config();
 const { env } = require('../config/env');
 const { logger } = require('../config/logger');
 const { openChannelTableIfExists } = require('../services/vector/lancedb');
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 function parseBooleanArg(flag, defaultVal = false) {
   const idx = process.argv.findIndex(a => a === flag);
@@ -26,12 +27,12 @@ function isVectorInvalid(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) 
 
 async function main() {
   const inputArg = process.argv[2];
-  const channelId = inputArg || env.YOUTUBE_CHANNEL_ID || null;
-  const showAll = parseBooleanArg('--show-all', false);
+  const channelId = inputArg || await getActiveChannelId();
   if (!channelId) {
-    logger.error('Укажите channelId аргументом или через .env (YOUTUBE_CHANNEL_ID)');
+    logger.error('Укажите channelId аргументом или установите активный канал в settings.json');
     process.exit(1);
   }
+  const showAll = parseBooleanArg('--show-all', false);
 
   const { table, tableName } = await openChannelTableIfExists(channelId);
   if (!table) {

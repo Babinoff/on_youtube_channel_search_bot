@@ -9,6 +9,7 @@ const { embedTexts, resolveProviderChain } = require("../services/embeddings");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
 // NEW: admin notifier for progress updates
 const { canNotify, notifyAdminProgress } = require("../services/admin/notifier");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 // deduped duplicate imports
 
 
@@ -87,13 +88,13 @@ async function main() {
     }
     
 
-    // Отныне аргумент из CLI имеет приоритет над .env
+    // Отныне аргумент из CLI имеет приоритет над settings.json
     const inputArg = process.argv[2];
-    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
     const useArg = Boolean(inputArg);
-    const input = useArg ? inputArg : inputEnv;
+    const activeId = await getActiveChannelId();
+    const input = useArg ? inputArg : activeId;
     if (!input) {
-      logger.info("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID): npm run index:batch -- <channelId|url|@handle> --limit 100");
+      logger.info("Активный канал не задан. Установите через /set_channel в админке или передайте аргумент: npm run index:batch -- <channelId|url|@handle> --limit 100");
       process.exit(1);
     }
 
@@ -108,7 +109,7 @@ async function main() {
 
     await updateLockMeta('indexing', { stage: 'resolve_channel', input });
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    const channelId = useArg ? await resolveChannelId(inputArg, client) : inputEnv;
+    const channelId = await resolveChannelId(input, client);
 
     // NEW: helper to notify admin with bound channelId
     const notify = (meta) => {

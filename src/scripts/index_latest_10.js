@@ -7,6 +7,7 @@ const { embedTexts } = require("../services/embeddings");
 const { addDocsToChannelTable } = require("../services/vector/lancedb");
 const { normalizeDescription } = require("../services/text/normalize");
 const { toVideoEntity } = require("../services/youtube/video");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 
 // Heuristic: strip trailing self‑promo sections using patterns from env
@@ -32,13 +33,13 @@ async function main() {
     }
     
 
-    // Отныне аргумент из CLI имеет приоритет над .env
+    // Отныне аргумент из CLI имеет приоритет над settings.json
     const inputArg = process.argv[2];
-    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
     const useArg = Boolean(inputArg);
-    const input = useArg ? inputArg : inputEnv;
+    const activeId = await getActiveChannelId();
+    const input = useArg ? inputArg : activeId;
     if (!input) {
-      logger.info("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID): npm run index:test -- <channelId|url|@handle>");
+      logger.info("Активный канал не задан. Установите через /set_channel или передайте аргумент: npm run index:test -- <channelId|url|@handle>");
       process.exit(1);
     }
 
@@ -51,8 +52,8 @@ async function main() {
     await updateLockMeta('indexing', { stage: 'resolve_channel', input });
 
     const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-    logger.info({ inputFrom: useArg ? "argv" : "env", input }, "Резолв канала...");
-    const channelId = useArg ? await resolveChannelId(inputArg, client) : inputEnv;
+    logger.info({ inputFrom: useArg ? "argv" : "settings", input }, "Резолв канала...");
+    const channelId = await resolveChannelId(input, client);
     await updateLockMeta('indexing', { stage: 'list_uploads', channelId });
     logger.info({ channelId }, "Канал определён");
 

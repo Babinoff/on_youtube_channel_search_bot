@@ -5,15 +5,15 @@ const { env } = require("../config/env");
 const { getChannelTableName } = require("../services/vector/lancedb");
 const { isLocked } = require("../services/concurrency/lock");
 const { createYouTubeClient, resolveChannelId } = require("../services/youtube/client");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 function getDbDir() {
   return env.LANCEDB_DIR || "./data/lancedb";
 }
 
 async function resolveInputChannelId(input) {
-  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
   const useArg = Boolean(input);
-  const raw = useArg ? input : inputEnv;
+  const raw = useArg ? input : await getActiveChannelId();
   if (!raw) return null;
   if (!env.YOUTUBE_API_KEY) return raw; // best effort
   const client = createYouTubeClient(env.YOUTUBE_API_KEY);
@@ -40,7 +40,7 @@ async function main() {
 
     const channelId = await resolveInputChannelId(input);
     if (!channelId) {
-      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
+      console.error("Укажите канал через аргумент или установите активный канал в settings.json.");
       process.exit(1);
     }
 

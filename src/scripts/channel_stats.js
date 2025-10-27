@@ -1,7 +1,8 @@
 require("dotenv").config();
 const { env } = require("../config/env");
-const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos } = require("../services/youtube/client");
-const { openChannelTableIfExists, getChannelTableName } = require("../services/vector/lancedb");
+const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos } = require("../services/youtube/latest");
+const { openChannelTableIfExists, getChannelTableName, countIndexed } = require("../services/vector/lancedb");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 async function countUploads(channelId) {
   if (!env.YOUTUBE_API_KEY) {
@@ -33,16 +34,17 @@ async function countIndexed(channelId) {
 async function main() {
   try {
     const inputArg = process.argv[2];
-    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
     const useArg = Boolean(inputArg);
-    const input = useArg ? inputArg : inputEnv;
+    const activeId = await getActiveChannelId();
+    const input = useArg ? inputArg : activeId;
     if (!input) {
-      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
+      logger.error("Активный канал не задан. Установите через админку или передайте аргумент: npm run channel:stats -- <channelId|url|@handle>");
       process.exit(1);
     }
 
-    const client = env.YOUTUBE_API_KEY ? createYouTubeClient(env.YOUTUBE_API_KEY) : null;
-    const channelId = client ? await resolveChannelId(input, client) : input;
+    const client = createYouTubeClient(env.YOUTUBE_API_KEY);
+    const channelId = await resolveChannelId(input, client);
+    logger.info({ channelId, source: useArg ? 'argv' : 'settings' }, 'Статистика канала');
 
     const uploads = await countUploads(channelId);
     const indexed = await countIndexed(channelId);

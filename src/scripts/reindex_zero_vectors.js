@@ -126,7 +126,10 @@ async function safeUpdateOrReplace(table, doc) {
 async function main() {
   const argv = process.argv.slice(2);
   const inputArg = argv.find(a => a && !a.startsWith('--'));
-  const channelId = inputArg || env.YOUTUBE_CHANNEL_ID || null;
+  let activeId = null; let getActiveChannelId;
+  try { ({ getActiveChannelId } = require('../services/admin/server_settings_store')); } catch (_) {}
+  try { activeId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { activeId = null; }
+  const channelId = inputArg || activeId || null;
   const dryRun = parseBooleanArg('--dry-run', false);
   const limit = parseNumberArg('--limit', 100);
   const onInvalid = (function(){
@@ -136,7 +139,7 @@ async function main() {
   })();
 
   if (!channelId) {
-    logger.error('Укажите channelId аргументом или через .env (YOUTUBE_CHANNEL_ID)');
+    logger.error('Укажите channelId аргументом или выберите активный канал в settings.json');
     process.exit(1);
   }
 

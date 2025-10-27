@@ -89,7 +89,11 @@ async function readTableStats(channelIdOverride) {
 
   // Channel table
   try {
-    const chRaw = channelIdOverride || env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
+    let chRaw = channelIdOverride || null;
+    if (!chRaw) {
+      try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
+      try { chRaw = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { chRaw = null; }
+    }
     out.channel = { id: chRaw };
     if (chRaw) {
       const { table, tableName } = await openChannelTableIfExists(chRaw);
@@ -116,7 +120,11 @@ async function readTableStats(channelIdOverride) {
 
 async function testSearch(sampleText, channelIdOverride) {
   try {
-    const channelId = channelIdOverride || env.YOUTUBE_CHANNEL_ID || null;
+    let channelId = channelIdOverride || null;
+    if (!channelId) {
+      try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
+      try { channelId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { channelId = null; }
+    }
     const providerMax = getProviderDistanceMax();
     const res = await searchTopK(sampleText, 5, { channelId, maxDistance: providerMax });
     const scores = res.map(r => Number(r.score)).filter(n => Number.isFinite(n));
@@ -157,11 +165,10 @@ async function main() {
   const channelArg = argv.find(a => a && (a.startsWith("@") || /^UC[\w-]{20,}$/.test(a) || /^https?:\/\//.test(a)));
   const sampleText = argv.filter(a => a !== channelArg).join(' ') || 'Аббадон';
 
-  let activeId = null;
+  let activeId = null; let getActiveChannelId;
   try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
   try { activeId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { activeId = null; }
-  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
-  const raw = channelArg || inputEnv || activeId;
+  const raw = channelArg || activeId;
   let channelId = raw || null;
   try {
     if (raw && !/^UC[\w-]{20,}$/.test(raw) && env.YOUTUBE_API_KEY) {
@@ -179,7 +186,7 @@ async function main() {
   console.log(`SEARCH_ADAPTIVE_ITERS: ${env.SEARCH_ADAPTIVE_ITERS}`);
   console.log(`SEARCH_ADAPTIVE_STEP: ${env.SEARCH_ADAPTIVE_STEP}`);
   console.log(`LANCEDB_DIR: ${env.LANCEDB_DIR || './data/lancedb'}`);
-  console.log(`CHANNEL_SOURCE: ${channelArg ? 'argv' : (inputEnv ? 'env' : (activeId ? 'active' : 'none'))}`);
+  console.log(`CHANNEL_SOURCE: ${channelArg ? 'argv' : (activeId ? 'settings' : 'none')}`);
   console.log(`CHANNEL_ID: ${channelId || '(не задан)'}`);
 
   console.log("\n=== Провайдеры: статус ===");
@@ -210,7 +217,7 @@ async function main() {
   } else if (stats.channel?.id) {
     console.log(`channel: ${stats.channel.name} | exists=${stats.channel.exists} | rows=${stats.channel.count ?? '?'}`);
   } else {
-    console.log(`channel: не задан (активный или .env)`);
+    console.log(`channel: не задан (settings.json)`);
   }
 
   // NEW: invalid embeddings and dims stats
@@ -252,7 +259,11 @@ function isVectorInvalid(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) 
 }
 
 async function readInvalidEmbedsStats(channelIdOverride) {
-  const chRaw = channelIdOverride || env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
+  let chRaw = channelIdOverride || null;
+  if (!chRaw) {
+    try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
+    try { chRaw = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { chRaw = null; }
+  }
   if (!chRaw) return { channelId: null };
   const { table, tableName } = await openChannelTableIfExists(chRaw);
   if (!table) return { channelId: chRaw, tableName, exists: false };

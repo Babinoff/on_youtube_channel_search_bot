@@ -5,6 +5,7 @@ const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploads
 const { normalizeDescription } = require("../services/text/normalize");
 const { toVideoEntity } = require("../services/youtube/video");
 const { searchTopK } = require("../services/vector/lancedb");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 function formatDateYYYYMMDD(d) {
   if (!d) return null;
@@ -20,14 +21,11 @@ async function main() {
   const useDb = process.argv.includes('--db') || String(process.env.PREVIEW_USE_DB || 'false') === 'true';
 
   const inputArg = process.argv[2];
-  const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || env.YOUTUBE_CHANNEL_URL || env.YOUTUBE_CHANNEL_HANDLE || null;
-  let activeId = null;
-  try { ({ getActiveChannelId } = require("../services/admin/server_settings_store")); } catch (_) {}
-  try { activeId = typeof getActiveChannelId === 'function' ? await getActiveChannelId() : null; } catch (_) { activeId = null; }
+  const activeId = await getActiveChannelId();
   const useArg = Boolean(inputArg);
-  const raw = useArg ? inputArg : (inputEnv || activeId);
+  const raw = useArg ? inputArg : activeId;
   if (!raw) {
-    logger.error("Не удалось определить канал: укажите аргумент, .env (YOUTUBE_CHANNEL_ID|URL|HANDLE) или установите активный канал.");
+    logger.error("Не удалось определить канал: укажите аргумент или установите активный канал в settings.json (админка).");
     process.exit(1);
   }
 
@@ -51,13 +49,13 @@ async function main() {
         client = createYouTubeClient(env.YOUTUBE_API_KEY);
         channelId = await resolveChannelId(raw, client);
       } else {
-        logger.error("Для режима --db укажите channelId вида UC... или задайте .env YOUTUBE_CHANNEL_ID");
+        logger.error("Для режима --db укажите channelId вида UC... или задайте YOUTUBE_API_KEY");
         process.exit(1);
       }
     }
   }
 
-  logger.info({ channelId, source: useArg ? 'argv' : (inputEnv ? 'env' : 'active'), mode: useDb ? 'db' : 'api' }, "Предпросмотр последних видео");
+  logger.info({ channelId, source: useArg ? 'argv' : 'settings', mode: useDb ? 'db' : 'api' }, "Предпросмотр последних видео");
 
   if (useDb) {
     const results = await searchTopK("", 10, { latestMode: true, channelId });

@@ -1,6 +1,5 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
 
 const SETTINGS_DIR = path.resolve(process.cwd(), "data", "server");
@@ -55,18 +54,13 @@ async function setActiveChannel(id) {
   const s = await readSettings();
   s.activeChannelId = id;
   await writeSettings(s);
-  try {
-    // Обновляем глобальный канал для совместимости со скриптами
-    env.setGlobalChannelId(id);
-  } catch (e) {
-    logger.warn({ err: e?.message }, "Не удалось обновить глобальный канал через env.setGlobalChannelId");
-  }
   return s;
 }
 
 async function getActiveChannelId() {
   const s = await readSettings();
-  return s.activeChannelId || env.YOUTUBE_CHANNEL_ID || null;
+  // Единый источник правды: только settings.json
+  return s.activeChannelId || null;
 }
 
 module.exports = {

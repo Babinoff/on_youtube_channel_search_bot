@@ -2,7 +2,9 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { env } = require("../config/env");
-const { openChannelTableIfExists, getChannelTableName } = require("../services/vector/lancedb");
+const { openChannelTableIfExists, countIndexed } = require("../services/vector/lancedb");
+const { getChannelTableName } = require("../services/vector/lancedb_tables");
+const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 function getDbDir() {
   return env.LANCEDB_DIR || "./data/lancedb";
@@ -31,14 +33,14 @@ function readModified(tableName) {
 async function main() {
   try {
     const inputArg = process.argv[2];
-    const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID;
     const useArg = Boolean(inputArg);
-    const channelId = useArg ? inputArg : inputEnv;
+    const activeId = await getActiveChannelId();
+    const channelId = useArg ? inputArg : activeId;
     if (!channelId) {
-      console.error("Укажите канал через аргумент или .env (YOUTUBE_CHANNEL_ID).");
+      logger.error("Активный канал не задан. Установите через админку или передайте аргумент: npm run channel:db:stats -- <channelId>");
       process.exit(1);
     }
-
+    logger.info({ channelId, source: useArg ? 'argv' : 'settings' }, 'Статистика по таблице канала');
     const tableName = getChannelTableName(channelId);
     const indexed = await countIndexed(channelId);
     const modified = readModified(tableName);

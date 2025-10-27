@@ -11,7 +11,7 @@
   - Установите зависимости: `npm install`.
 - Проверка окружения: `node src/scripts/env_check.js` — валидирует ключи и диапазоны (`k`) и выводит сводку.
 - Запуск бота (polling): `npm run dev` или `npm start`.
-- Предпросмотр очистки описаний: `npm run preview:index` (берёт канал из `.env`).
+- Предпросмотр очистки описаний: `npm run preview:index` (берёт активный канал из `data/server/settings.json`).
 - Индексация на 10 видео: `npm run index:test -- <channelId|url|@handle>`.
 
 ## Переменные окружения
@@ -23,8 +23,8 @@
 - `ADMIN_USER_ID` — числовой `userId` администратора Telegram. Только ему доступны команды из раздела «Админ».
 
 Каналы:
-- `YOUTUBE_CHANNEL_ID` — канал по умолчанию для CLI (используют `preview:index`, `index:batch`, `check:youtube`).
-- `YOUTUBE_CHANNELS_ID` — список каналов, доступных пользователям в боте; CSV или `|` (например: `@my,UCabc123|https://youtube.com/@other`).
+- Канал по умолчанию задаётся в `data/server/settings.json` (`activeChannelId`). CLI и админ‑команды читают его из настроек; `YOUTUBE_CHANNEL_ID` запрещена.
+- Список каналов управляется только через `data/server/settings.json` (`channels`). Переменные окружения `YOUTUBE_CHANNEL_ID` и `YOUTUBE_CHANNELS_ID` запрещены.
 
 Эмбеддинги (переключаемый провайдер):
 - `EMBEDDINGS_PROVIDER` — `xenova` (локально, без сети), `mistral`, `openai`, `google`, `embeddinggemma` (локальный доступ к модели через Ollama). По умолчанию `xenova`.
@@ -83,7 +83,7 @@
     - Если стартовый порог отрицательный или слишком мал, адаптация автоматически поднимет его до разумного значения, не превышая `getProviderDistanceMax()`.
   
   ## Примеры
-  - Предпросмотр очистки по `.env`: `npm run preview:index`.
+  - Предпросмотр очистки: `npm run preview:index` (активный канал берётся из `data/server/settings.json`).
   - Тестовая индексация 10 видео: `npm run index:test -- https://youtube.com/@mychannel`.
   - Батч 500 видео без ранней остановки: `npm run index:batch -- @mychannel --limit 500 --stop-on-first-known off`.
   - Поиск в тестовой таблице: `npm run search:test -- "BIM IFC SQLite"`.
@@ -116,7 +116,7 @@
 Доступны только пользователю с `ADMIN_USER_ID`:
 - /lock_status [name] — показать статус блокировок.
 - /lock_force [name] [--force] — принудительно снять блокировку.
-- /list_channels — показать все подключённые каналы (env и серверные).
+- /list_channels — показать все каналы из настроек сервера.
 - /add_channel <@хэндл|channelId> — добавить новый канал в серверные настройки.
 - /active_channel — показать текущий активный канал.
 - /set_channel <@хэндл|channelId> — сменить активный канал.
@@ -127,7 +127,7 @@
 - /check_youtube — проверка YouTube API для активного канала.
 - /index_latest — индексировать последние 10 видео активного канала.
 - /index_batch [--limit N] [--stop-on-first-known on|off] — массовая индексация активного канала.
-- /preview_latest — предпросмотр очистки последних 10 видео по .env.
+- /preview_latest — предпросмотр очистки последних 10 видео по активному каналу (settings.json).
 - /search_latest <query> — тестовый поиск по тестовой таблице.
 - /env_check — сводка и валидация окружения.
 - /emb_status — статус провайдера эмбеддингов и размерность.
@@ -140,7 +140,7 @@
   - Пример: `npm run check:youtube -- <channelId|url|@handle>`.
 
 - `preview:index` — предпросмотр очистки описаний и JSON‑документов (без эмбеддингов).
-  - Канал берётся из `.env` (`YOUTUBE_CHANNEL_ID`) без аргументов.
+  - Канал берётся из `data/server/settings.json` (`activeChannelId`) без аргументов.
 
 - `index:test` — тестовая индексация 10 видео в временную таблицу.
   - Пример: `npm run index:test -- <channelId|url|@handle>`.
@@ -162,6 +162,28 @@
 - `channel:db:list` — список таблиц каналов в LanceDB.
 - `channel:db:delete` — удалить таблицу канала.
 - `node src/scripts/env_check.js` — самопроверка окружения (если удобнее без `npm run`).
+
+## Серверные настройки (settings.json)
+- Файл: `data/server/settings.json`.
+- Поля:
+  - `activeChannelId` — текущий активный канал для бота и CLI.
+  - `channels[]` — список подключённых каналов; элементы: `id`, `title` (опционально), `handle` (опционально).
+  - `updatedAt` — метка времени, автоматически обновляется при изменениях.
+- Пример:
+```json
+{
+  "activeChannelId": "UC7fI8SmlQm2Q9nNYkwiRatg",
+  "channels": [
+    { "id": "UC7fI8SmlQm2Q9nNYkwiRatg", "title": "Мой канал", "handle": "@mychannel", "source": "server" },
+    { "id": "UCxxxxxxxxxxxxxxxxxxxxxx", "title": "Другой канал", "handle": "@other", "source": "server" }
+  ],
+  "updatedAt": "2025-01-01T00:00:00.000Z"
+}
+```
+- Управление:
+  - Добавить канал: `/add_channel <@хэндл|channelId>`.
+  - Установить активный: `/set_channel <@хэндл|channelId>`.
+  - Допускается прямое редактирование файла, но предпочтительнее команды.
 
 ## Окружение (.env)
 - `SEARCH_MAX_DISTANCE` — порог distance по умолчанию (напр. `0.7`).

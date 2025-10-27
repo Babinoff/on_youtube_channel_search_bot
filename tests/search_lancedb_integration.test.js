@@ -71,10 +71,14 @@ describe('searchTopK adaptive integration', () => {
         SEARCH_ADAPTIVE_ITERS: 3,
         SEARCH_ADAPTIVE_STEP: 0.5,
         SEARCH_NORMALIZE_QUERY: 0,
-        YOUTUBE_CHANNEL_ID: 'UC7fI8SmlQm2Q9nNYkwiRatg',
         LANCEDB_DIR: './tmp/lancedb_test',
       },
       setGlobalChannelId: (val) => {},
+    }))
+
+    // Мокаем источник активного канала из settings.json
+    vi.mock('../src/services/admin/server_settings_store.js', () => ({
+      getActiveChannelId: vi.fn(async () => 'UC7fI8SmlQm2Q9nNYkwiRatg'),
     }))
 
     // На всякий случай перемокаем LanceDB после resetModules

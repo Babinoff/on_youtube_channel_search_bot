@@ -4,6 +4,7 @@ import { normalizeQueryText } from '../src/services/text/query_normalize';
 import { embedTexts, resolveProviderChain, getProviderDistanceMax } from '../src/services/embeddings';
 import { openChannelTableIfExists } from '../src/services/vector/lancedb';
 import { applyAdaptiveFilter } from '../src/services/vector/adaptive_filter';
+import { getActiveChannelId } from '../src/services/admin/server_settings_store';
 
 function averageVectors(vectors) {
   const arr = (vectors || []).filter((v) => Array.isArray(v));
@@ -59,11 +60,11 @@ describe('search live detailed (uses active env settings)', () => {
     const query = process.env.SEARCH_TEST_QUERY || 'Vampire The Masquerade';
     const k = Math.max(1, Number(process.env.SEARCH_TEST_K || env.SEARCH_TOP_K || 5));
     const type = normalizeType(process.env.SEARCH_TEST_TYPE ?? null);
-    const channelId = process.env.SEARCH_TEST_CHANNEL_ID || env.YOUTUBE_CHANNEL_ID || null;
+    const channelId = process.env.SEARCH_TEST_CHANNEL_ID || await getActiveChannelId();
     const chain = resolveProviderChain();
 
     if (!channelId) {
-      console.warn('SKIP: YOUTUBE_CHANNEL_ID not set. Provide SEARCH_TEST_CHANNEL_ID or set .env');
+      console.warn('SKIP: active channel not set. Provide SEARCH_TEST_CHANNEL_ID or set in settings.json');
       expect(true).toBe(true);
       return;
     }
@@ -89,7 +90,7 @@ describe('search live detailed (uses active env settings)', () => {
     console.log(`SEARCH_ADAPTIVE_ITERS: ${env.SEARCH_ADAPTIVE_ITERS}`);
     console.log(`SEARCH_ADAPTIVE_STEP: ${env.SEARCH_ADAPTIVE_STEP}`);
     console.log(`SEARCH_MAX_K: ${env.SEARCH_MAX_K}`);
-    console.log(`YOUTUBE_CHANNEL_ID: ${channelId}`);
+    console.log(`activeChannelId: ${channelId}`);
 
     const hs = hybridSettings();
     console.log('Hybrid settings:', hs);

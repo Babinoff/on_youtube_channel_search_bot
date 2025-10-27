@@ -8,6 +8,7 @@ const { applyAdaptiveFilter } = require("./adaptive_filter");
 const { isLocked, waitForUnlock } = require("../concurrency/lock");
 const { readLockInfo } = require("../concurrency/lock");
 const { normalizeQueryText } = require("../text/query_normalize");
+const { getActiveChannelId } = require("../admin/server_settings_store");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -138,7 +139,7 @@ async function searchTopK(query, k = 5, opts = {}) {
       tableName = opts.mockTableName || 'video_embeddings_mock';
       logger.info({ tableName }, "Поиск (latest): использую мок-таблицу (тест)");
     } else {
-      const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
+      const preferredChannelId = opts.channelId || await getActiveChannelId() || null;
       if (preferredChannelId) {
         const opened = await openChannelTableIfExists(preferredChannelId);
         if (opened.table) {
@@ -269,7 +270,7 @@ async function searchTopK(query, k = 5, opts = {}) {
     tableName = opts.mockTableName || 'video_embeddings_mock';
     logger.info({ tableName }, "Поиск: использую мок-таблицу (тест)");
   } else {
-    const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
+    const preferredChannelId = opts.channelId || await getActiveChannelId() || null;
     if (preferredChannelId) {
       const opened = await openChannelTableIfExists(preferredChannelId);
       if (opened.table) {

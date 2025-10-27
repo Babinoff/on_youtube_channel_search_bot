@@ -30,6 +30,11 @@ function loadEnvFile() {
 
 loadEnvFile();
 
+// Жёсткий отказ от .env каналов: наличие этих переменных — ошибка
+if (process.env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNELS_ID) {
+  throw new Error("Запрещено использовать YOUTUBE_CHANNEL_ID/YOUTUBE_CHANNELS_ID в .env — удалите их.");
+}
+
 function requireEnv(name) {
   const val = process.env[name];
   if (!val) {
@@ -45,13 +50,22 @@ function parseBool(input, defaultVal = false) {
   return defaultVal;
 }
 
+function readSettingsSync() {
+  try {
+    const settingsPath = path.resolve(process.cwd(), "data", "server", "settings.json");
+    if (!fs.existsSync(settingsPath)) return null;
+    const raw = fs.readFileSync(settingsPath, "utf8");
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
 const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : undefined,
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-  YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID || "",
-  YOUTUBE_CHANNELS_ID: process.env.YOUTUBE_CHANNELS_ID || "",
   YOUTUBE_CHANNEL_URL: process.env.YOUTUBE_CHANNEL_URL || "",
   YOUTUBE_CHANNEL_HANDLE: process.env.YOUTUBE_CHANNEL_HANDLE || "",
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
@@ -114,9 +128,6 @@ const env = {
   require: (name) => requireEnv(name),
 };
 
-function setGlobalChannelId(id) {
-  env.YOUTUBE_CHANNEL_ID = id || undefined;
-}
 
 function validateEnv() {
   const errors = [];
@@ -177,4 +188,4 @@ function validateEnv() {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-module.exports = { env, setGlobalChannelId, validateEnv, requireEnv };
+module.exports = { env, validateEnv, requireEnv };

@@ -1,6 +1,17 @@
 const dotenv = require("dotenv");
+const fs = require("fs");
+const path = require("path");
 
 dotenv.config();
+
+// Запрещаем устаревшие переменные окружения каналов
+if (process.env.YOUTUBE_CHANNEL_ID !== undefined || process.env.YOUTUBE_CHANNELS_ID !== undefined) {
+  const present = [
+    process.env.YOUTUBE_CHANNEL_ID !== undefined ? "YOUTUBE_CHANNEL_ID" : null,
+    process.env.YOUTUBE_CHANNELS_ID !== undefined ? "YOUTUBE_CHANNELS_ID" : null,
+  ].filter(Boolean).join(", ");
+  throw new Error(`Запрещено: ${present} — активный канал настраивается в data/server/settings.json`);
+}
 
 function requireEnv(name) {
   const val = process.env[name];
@@ -15,8 +26,6 @@ const env = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : undefined,
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-  YOUTUBE_CHANNEL_ID: process.env.YOUTUBE_CHANNEL_ID || "",
-  YOUTUBE_CHANNELS_ID: process.env.YOUTUBE_CHANNELS_ID || "",
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
   EMBEDDINGS_PROVIDER_CHAIN: process.env.EMBEDDINGS_PROVIDER_CHAIN || "",
   MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
@@ -56,9 +65,6 @@ const env = {
   require: (name) => requireEnv(name),
 };
 
-function setGlobalChannelId(id) {
-  env.YOUTUBE_CHANNEL_ID = id || undefined;
-}
 
 function validateEnv() {
   const { logger } = require("./logger");
@@ -134,4 +140,4 @@ function validateEnv() {
 
   return { ok: errors.length === 0, errors, warnings };
 }
-module.exports = { env, setGlobalChannelId, validateEnv };
+module.exports = { env, validateEnv };
