@@ -4,6 +4,7 @@ const { env } = require("../config/env");
 const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos, getVideosDetails } = require("../services/youtube/client");
 const { normalizeDescription } = require("../services/text/normalize");
 const { toVideoEntity } = require("../services/youtube/video");
+const { searchTopK } = require("../services/vector/lancedb");
 
 function formatDateYYYYMMDD(d) {
   if (!d) return null;
@@ -16,11 +17,7 @@ function formatDateYYYYMMDD(d) {
 }
 
 async function main() {
-  const client = createYouTubeClient(env.YOUTUBE_API_KEY);
-  if (!env.YOUTUBE_API_KEY) {
-    logger.error("YOUTUBE_API_KEY отсутствует — заполните .env");
-    process.exit(1);
-  }
+  const useDb = process.argv.includes('--db') || String(process.env.PREVIEW_USE_DB || 'false') === 'true';
 
   const inputArg = process.argv[2];
   const inputEnv = env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || env.YOUTUBE_CHANNEL_URL || env.YOUTUBE_CHANNEL_HANDLE || null;
@@ -33,16 +30,53 @@ async function main() {
     logger.error("Не удалось определить канал: укажите аргумент, .env (YOUTUBE_CHANNEL_ID|URL|HANDLE) или установите активный канал.");
     process.exit(1);
   }
-  const channelId = /^UC[\w-]{20,}$/.test(raw) ? raw : await resolveChannelId(raw, client);
 
-  logger.info({ channelId, source: useArg ? 'argv' : (inputEnv ? 'env' : 'active') }, "Предпросмотр индексации");
+  const isUC = /^UC[\w-]{20,}$/.test(raw);
+  let channelId = null;
+  let client = null;
 
-  const uploadsId = await getUploadsPlaylistId(channelId, client);
-  const page1 = await listUploadsVideos(uploadsId, client);
+  if (isUC) {
+    channelId = raw;
+  } else {
+    if (!useDb) {
+      if (!env.YOUTUBE_API_KEY) {
+        logger.error("YOUTUBE_API_KEY отсутствует — заполните .env или укажите channelId формата UC... для режима без API");
+        process.exit(1);
+      }
+      client = createYouTubeClient(env.YOUTUBE_API_KEY);
+      channelId = await resolveChannelId(raw, client);
+    } else {
+      // В режиме --db пытаемся резолвить только при наличии API ключа; иначе требуем UC...
+      if (env.YOUTUBE_API_KEY) {
+        client = createYouTubeClient(env.YOUTUBE_API_KEY);
+        channelId = await resolveChannelId(raw, client);
+      } else {
+        logger.error("Для режима --db укажите channelId вида UC... или задайте .env YOUTUBE_CHANNEL_ID");
+        process.exit(1);
+      }
+    }
+  }
+
+  logger.info({ channelId, source: useArg ? 'argv' : (inputEnv ? 'env' : 'active'), mode: useDb ? 'db' : 'api' }, "Предпросмотр последних видео");
+
+  if (useDb) {
+    const results = await searchTopK("", 10, { latestMode: true, channelId });
+    console.log(JSON.stringify({ channelId, count: results.length, ids: results.map(r => r.id) }, null, 2));
+    return;
+  }
+
+  const clientApi = client || createYouTubeClient(env.YOUTUBE_API_KEY);
+  if (!env.YOUTUBE_API_KEY) {
+    logger.error("YOUTUBE_API_KEY отсутствует — заполните .env");
+    process.exit(1);
+  }
+
+  const uploadsId = await getUploadsPlaylistId(channelId, clientApi);
+  const page1 = await listUploadsVideos(uploadsId, clientApi);
   const videoIds = (page1.items || []).map(i => i.contentDetails?.videoId).filter(Boolean).slice(0, 10);
   logger.info({ count: videoIds.length }, "Выбрано видео для предпросмотра (до 10)");
 
-  const details = videoIds.length ? await getVideosDetails(videoIds, client) : [];
+  const details = videoIds.length ? await getVideosDetails(videoIds, clientApi) : [];
 
   const docsMeta = details.map((v, idx) => {
     const base = toVideoEntity(v);

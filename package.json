@@ -10,6 +10,7 @@
     "check:youtube": "node src/scripts/check_youtube.js",
     "index:test": "node src/scripts/index_latest_10.js",
     "index:batch": "node src/scripts/index_batch.js",
+    "reindex:zero": "node src/scripts/reindex_zero_vectors.js",
     "search:test": "node src/scripts/search_latest_10.js",
     "preview:index": "node src/scripts/preview_latest_10.js",
     "lock:status": "node src/scripts/lock_status.js",

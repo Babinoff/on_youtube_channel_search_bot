@@ -213,6 +213,12 @@ async function main() {
     console.log(`channel: не задан (активный или .env)`);
   }
 
+  // NEW: invalid embeddings and dims stats
+  const inv = await readInvalidEmbedsStats(channelId);
+  if (inv?.exists) {
+    console.log(`invalid: count=${inv.invalidCount ?? '?'} | dims[count=${inv.dimsStats?.count ?? 0}, min=${inv.dimsStats?.min ?? '-'}, max=${inv.dimsStats?.max ?? '-'}, avg=${inv.dimsStats?.avg ? inv.dimsStats.avg.toFixed(2) : '-'}]`);
+  }
+
   console.log("\n=== Поиск: быстрая проверка (порог = максимум провайдера) ===");
   const s = await testSearch(sampleText, channelId);
   if (!s.ok) {
@@ -233,3 +239,51 @@ main().catch((err) => {
   console.error("emb_status: ERROR", err?.message || err);
   process.exit(1);
 });
+
+
+function isVectorInvalid(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) {
+  if (vec == null) return true;
+  if (!Array.isArray(vec)) return true;
+  if (vec.length < minDims) return true;
+  for (let i = 0; i < vec.length; i++) {
+    if (!Number.isFinite(vec[i])) return true;
+  }
+  return false;
+}
+
+async function readInvalidEmbedsStats(channelIdOverride) {
+  const chRaw = channelIdOverride || env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_CHANNEL_ID || null;
+  if (!chRaw) return { channelId: null };
+  const { table, tableName } = await openChannelTableIfExists(chRaw);
+  if (!table) return { channelId: chRaw, tableName, exists: false };
+
+  let rows = [];
+  try {
+    const q = table.query().select(['id','vector','invalid_vector']);
+    rows = typeof q.toArray === 'function' ? await q.toArray() : await q.limit(100000000).execute();
+  } catch (e) {
+    const schemaErr = String(e?.message || '').includes('No field named invalid_vector');
+    if (schemaErr) {
+      const q2 = table.query().select(['id','vector']);
+      rows = typeof q2.toArray === 'function' ? await q2.toArray() : await q2.limit(100000000).execute();
+    } else {
+      return { channelId: chRaw, tableName, exists: true, error: e?.message };
+    }
+  }
+
+  const minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256);
+  let invalidCount = 0;
+  let validDims = [];
+  for (const r of rows) {
+    const inv = r.invalid_vector === true || isVectorInvalid(r.vector, minDims);
+    if (inv) invalidCount++; else if (Array.isArray(r.vector)) validDims.push(r.vector.length);
+  }
+  const dimsStats = validDims.length ? {
+    count: validDims.length,
+    min: Math.min(...validDims),
+    max: Math.max(...validDims),
+    avg: validDims.reduce((s, n) => s + n, 0) / validDims.length,
+  } : { count: 0 };
+
+  return { channelId: chRaw, tableName, exists: true, invalidCount, dimsStats };
+}

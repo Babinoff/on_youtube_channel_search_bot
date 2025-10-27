@@ -74,6 +74,10 @@ const env = {
   EMBEDDINGS_TIMEOUT_MS: Number(process.env.EMBEDDINGS_TIMEOUT_MS || 30000),
   EMBEDDINGS_MAX_CHUNK_LEN: Number(process.env.EMBEDDINGS_MAX_CHUNK_LEN || 1000),
   EMBEDDINGS_CHUNK_OVERLAP: Number(process.env.EMBEDDINGS_CHUNK_OVERLAP || 200),
+  // Строгая валидация и поведение при невалидном векторе
+  EMBEDDINGS_STRICT_VALIDATION: parseBool(process.env.EMBEDDINGS_STRICT_VALIDATION, true),
+  EMBEDDINGS_ON_INVALID: process.env.EMBEDDINGS_ON_INVALID || 'mark', // 'skip' | 'mark'
+  EMBEDDINGS_MIN_DIMS: Number(process.env.EMBEDDINGS_MIN_DIMS || 256),
 
   // Search thresholds and ranges
   SEARCH_MAX_DISTANCE: Number(process.env.SEARCH_MAX_DISTANCE || 0.7),
@@ -91,6 +95,8 @@ const env = {
   SEARCH_ADAPTIVE_ITERS: Number(process.env.SEARCH_ADAPTIVE_ITERS || 3),
   SEARCH_ADAPTIVE_STEP: Number(process.env.SEARCH_ADAPTIVE_STEP || 0.5),
   SEARCH_MAX_K: Number(process.env.SEARCH_MAX_K || 20),
+  // Фильтровать записи с invalid_vector в обычном поиске
+  SEARCH_FILTER_INVALID_EMBEDS: parseBool(process.env.SEARCH_FILTER_INVALID_EMBEDS, true),
 
   // YouTube shorts classification
   SHORTS_MAX_SECONDS: Number(process.env.SHORTS_MAX_SECONDS || 60),

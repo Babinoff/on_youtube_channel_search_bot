@@ -2,7 +2,9 @@ const { env } = require("../../config/env");
 const { logger } = require("../../config/logger");
 
 function resolveProviderChain() {
-  const chainRaw = env.EMBEDDINGS_PROVIDER_CHAIN || env.EMBEDDINGS_PROVIDER || "mistral,xenova";
+  const overrideChain = process.env.EMBEDDINGS_PROVIDER_CHAIN;
+  const overrideProvider = process.env.EMBEDDINGS_PROVIDER;
+  const chainRaw = overrideChain || overrideProvider || env.EMBEDDINGS_PROVIDER_CHAIN || env.EMBEDDINGS_PROVIDER || "mistral,xenova";
   return String(chainRaw)
     .split(/[\s,|]+/)
     .map((s) => s.trim().toLowerCase())
@@ -50,7 +52,7 @@ const providerMeta = {
 
 function getProviderDistanceMax(chainInput) {
   const chain = Array.isArray(chainInput) ? chainInput : resolveProviderChain();
-  const first = (chain && chain[0]) ? chain[0] : String(env.EMBEDDINGS_PROVIDER || '').toLowerCase();
+  const first = (chain && chain[0]) ? chain[0] : String(process.env.EMBEDDINGS_PROVIDER || env.EMBEDDINGS_PROVIDER || '').toLowerCase();
   const meta = providerMeta[first];
   return (meta && Number.isFinite(meta.distanceMax)) ? meta.distanceMax : 2;
 }

@@ -274,6 +274,7 @@ async function main() {
   bot.on('message', async (ctx) => {
     const txt = ctx.message?.text;
     if (typeof txt === 'string' && knownButtons.has(txt)) return;
+    if (typeof txt === 'string' && txt.startsWith('/')) return; // не перехватываем Telegram-команды
     if (hasPendingInput(ctx.from.id)) return;
     await ctx.reply(defaultMessage, { reply_markup: buildMainKeyboard() });
   });

@@ -129,6 +129,128 @@ async function searchTopK(query, k = 5, opts = {}) {
     }
   }
 
+  const latestMode = Boolean(opts.latestMode);
+  if (latestMode) {
+    // Предпочитаем таблицу выбранного канала; если отсутствует — ошибка, иначе latest тестовая
+    let table; let tableName;
+    if (opts && opts.mockTable) {
+      table = opts.mockTable;
+      tableName = opts.mockTableName || 'video_embeddings_mock';
+      logger.info({ tableName }, "Поиск (latest): использую мок-таблицу (тест)");
+    } else {
+      const preferredChannelId = opts.channelId || env.YOUTUBE_CHANNEL_ID || null;
+      if (preferredChannelId) {
+        const opened = await openChannelTableIfExists(preferredChannelId);
+        if (opened.table) {
+          table = opened.table; tableName = opened.tableName;
+          logger.info({ tableName, channelId: preferredChannelId }, "Поиск (latest): использую таблицу канала");
+        } else {
+          tableName = opened.tableName;
+          logger.warn({ tableName, channelId: preferredChannelId }, "Поиск (latest): таблица канала отсутствует или недоступна");
+          throw new Error(`Таблица недоступна: ${tableName}. Попросите администратора создать и проиндексировать канал.`);
+        }
+      } else {
+        const openedTest = await openLatestTestTable();
+        table = openedTest.table; tableName = openedTest.tableName;
+        logger.info({ tableName }, "Поиск (latest): использую тестовую таблицу (latest10)");
+      }
+    }
+
+    // Plain query без vectorSearch: взять поля, опционально фильтровать по типу, потом сортировать по дате
+    const selectFields = [
+      'id', 'title', 'url', 'description_indexed', 'published_at', 'type', 'invalid_vector'
+    ];
+    let qb = typeof table.query === 'function' ? table.query() : table.search([]); // совместимость
+
+    const typeFilter = (opts.type === 'short' || opts.type === 'stream' || opts.type === 'video') ? opts.type : null;
+    try {
+      if (typeFilter && typeof qb.where === 'function') {
+        qb = qb.where(`type = '${typeFilter}'`);
+      } else if (typeFilter && typeof qb.filter === 'function') {
+        qb = qb.filter(`type = '${typeFilter}'`);
+        if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+      }
+    } catch (e) {
+      logger.warn({ err: e?.message, typeFilter }, "Latest: не удалось применить префильтр по типу; продолжу без него");
+    }
+
+    // В latestMode по умолчанию допускаем invalid; исключаем только если явно opts.includeInvalid === false
+    const excludeInvalid = (opts.includeInvalid === false);
+    try {
+      if (excludeInvalid && typeof qb.where === 'function') {
+        qb = qb.where("(invalid_vector IS NULL OR invalid_vector = false)");
+      } else if (excludeInvalid && typeof qb.filter === 'function') {
+        qb = qb.filter("(invalid_vector IS NULL OR invalid_vector = false)");
+        if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+      }
+    } catch (e) {
+      logger.warn({ err: e?.message }, "Latest: не удалось применить фильтр invalid_vector; продолжу без него");
+    }
+
+    let res;
+    try {
+      const q = typeof qb.select === 'function' ? qb.select(selectFields) : qb;
+      if (typeof q.toArray === 'function') {
+        res = await q.toArray();
+      } else {
+        res = await q.execute();
+      }
+    } catch (e) {
+      const msg = String(e?.message || '');
+      const schemaErr = msg.includes('No field named invalid_vector');
+      if (schemaErr) {
+        logger.warn({ err: e?.message }, 'Latest: схема без invalid_vector, повторяю запрос без этого поля и применю постфильтр при необходимости');
+        qb = typeof table.query === 'function' ? table.query() : table.search([]);
+        try {
+          if (typeFilter && typeof qb.where === 'function') {
+            qb = qb.where(`type = '${typeFilter}'`);
+          } else if (typeFilter && typeof qb.filter === 'function') {
+            qb = qb.filter(`type = '${typeFilter}'`);
+            if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+          }
+        } catch {}
+        const safeSelect = selectFields.filter(f => f !== 'invalid_vector');
+        const q2 = typeof qb.select === 'function' ? qb.select(safeSelect) : qb;
+        if (typeof q2.toArray === 'function') res = await q2.toArray(); else res = await q2.execute();
+      } else {
+        throw e;
+      }
+    }
+
+    let rows = Array.isArray(res) ? res : (typeof res?.toArray === 'function' ? res.toArray() : []);
+    if (excludeInvalid) rows = rows.filter(r => r && r.invalid_vector !== true);
+
+    rows.sort((a, b) => {
+      const at = new Date(a.published_at || a.snippet?.publishedAt || 0).getTime();
+      const bt = new Date(b.published_at || b.snippet?.publishedAt || 0).getTime();
+      return bt - at; // новее выше
+    });
+
+    // Удаляем дубликаты по id
+    const uniqueRows = [];
+    const seenIds = new Set();
+    for (const r of rows) {
+      const id = r && r.id;
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      uniqueRows.push(r);
+    }
+
+    const selectedRows = uniqueRows.slice(0, Math.max(1, k));
+    logger.info({ tableName, k, count: selectedRows.length, typeFilter }, "Поиск (latest) завершён: сортировка по дате");
+
+    return selectedRows.map((r, i) => ({
+      index: i + 1,
+      id: r.id,
+      title: r.title || r.snippet?.title || "(без названия)",
+      url: r.url || (r.id ? `https://youtu.be/${r.id}` : ""),
+      score: undefined,
+      description_indexed: r.description_indexed || "",
+      published_at: r.published_at || r.snippet?.publishedAt || null,
+      type: r.type || null,
+    }));
+  }
+
   const raw = String(query || '');
   const useNorm = env.SEARCH_NORMALIZE_QUERY;
   const norm = useNorm ? normalizeQueryText(raw) : raw;
@@ -184,21 +306,66 @@ async function searchTopK(query, k = 5, opts = {}) {
     logger.warn({ err: e?.message, typeFilter }, "Не удалось применить префильтр по типу; продолжу без него");
   }
 
+  // NEW: фильтр по invalid_vector, если включён в настройках и не переопределён opts.includeInvalid
+  const excludeInvalid = (String(env.SEARCH_FILTER_INVALID_EMBEDS || 'true') !== 'false') && !opts.includeInvalid;
+  try {
+    if (excludeInvalid && typeof qb.where === 'function') {
+      qb = qb.where("(invalid_vector IS NULL OR invalid_vector = false)");
+    } else if (excludeInvalid && typeof qb.filter === 'function') {
+      qb = qb.filter("(invalid_vector IS NULL OR invalid_vector = false)");
+      if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+    }
+  } catch (e) {
+    logger.warn({ err: e?.message }, "Не удалось применить фильтр invalid_vector; продолжу без него");
+  }
+
   // Берём больше кандидатов, лимитируем в конце
   const preLimitEnv = Number(env.SEARCH_PRELIMIT || 0);
   const preLimitFactor = Number(env.SEARCH_PRELIMIT_FACTOR || 4);
   const basePreLimit = Math.max(k, Number(env.SEARCH_MAX_K || 20));
   const preLimit = preLimitEnv > 0 ? preLimitEnv : Math.max(basePreLimit, basePreLimit * preLimitFactor);
   let res;
-  if (typeof qb.toArray === 'function') {
-    res = await qb.limit(preLimit).toArray();
-  } else {
-    res = await qb.limit(preLimit).execute();
+  try {
+    if (typeof qb.toArray === 'function') {
+      res = await qb.limit(preLimit).toArray();
+    } else {
+      res = await qb.limit(preLimit).execute();
+    }
+  } catch (e) {
+    const msg = String(e?.message || '');
+    const schemaErr = msg.includes('No field named invalid_vector');
+    if (excludeInvalid && schemaErr) {
+      logger.warn({ err: e?.message }, 'Схема без invalid_vector, повторяю запрос без предиката и применю постфильтр');
+      // Rebuild QB without invalid_vector predicate
+      qb = typeof table.vectorSearch === 'function' ? table.vectorSearch(qVec) : table.search(qVec);
+      try {
+        if (typeFilter && typeof qb.where === 'function') {
+          qb = qb.where(`type = '${typeFilter}'`);
+        } else if (typeFilter && typeof qb.filter === 'function') {
+          qb = qb.filter(`type = '${typeFilter}'`);
+          if (typeof qb.prefilter === 'function') qb = qb.prefilter(true);
+        }
+      } catch {}
+      if (typeof qb.toArray === 'function') {
+        res = await qb.limit(preLimit).toArray();
+      } else {
+        res = await qb.limit(preLimit).execute();
+      }
+    } else {
+      throw e;
+    }
   }
 
-  const rows = Array.isArray(res)
+  let rows = Array.isArray(res)
     ? res
     : (typeof res?.toArray === "function" ? res.toArray() : []);
+
+  // NEW: финальная фильтрация invalid_vector=true (на случай, если предикат не поддерживается)
+  if (excludeInvalid) {
+    rows = rows.filter(r => r && r.invalid_vector !== true);
+  }
+
+  // rows declared above and optionally filtered by invalid_vector
 
   // Адаптивная пороговая фильтрация: distance vs similarity
   const maxDistance = typeof opts.maxDistance === 'number' ? opts.maxDistance : env.SEARCH_MAX_DISTANCE;

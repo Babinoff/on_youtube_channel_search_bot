@@ -5,10 +5,11 @@ const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploads
 const { normalizeDescription } = require("../services/text/normalize");
 const { toVideoEntity } = require("../services/youtube/video");
 const { acquireLock, releaseLock, updateLockMeta } = require("../services/concurrency/lock");
-const { embedTexts } = require("../services/embeddings");
+const { embedTexts, resolveProviderChain } = require("../services/embeddings");
 const { openChannelTableIfExists, addDocsToChannelTable } = require("../services/vector/lancedb");
 // NEW: admin notifier for progress updates
-const { notifyAdminProgress, canNotify, fmtEta } = require("../services/admin/notifier");
+const { canNotify, notifyAdminProgress } = require("../services/admin/notifier");
+// deduped duplicate imports
 
 
 
@@ -198,7 +199,52 @@ async function main() {
     // Notify end of embedding
     await notify({ stage: 'embedding', total: docsMeta.length, current: docsMeta.length });
 
-    const docs = docsMeta.map((d, i) => ({ ...d, vector: vectors[i] }));
+    function describeInvalidVector(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) {
+      const reasons = [];
+      if (vec == null) reasons.push('vector null');
+      else if (!Array.isArray(vec)) reasons.push('vector not array');
+      else {
+        const dims = vec.length;
+        if (dims < minDims) reasons.push(`vector dims ${dims} < ${minDims}`);
+        if (!vec.every(Number.isFinite)) reasons.push('vector contains non-finite');
+      }
+      return reasons;
+    }
+
+    function isValidVector(v) {
+      const minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256);
+      return Array.isArray(v) && v.length >= minDims && v.every(Number.isFinite);
+    }
+    const strict = !!env.EMBEDDINGS_STRICT_VALIDATION;
+    const onInvalid = String(env.EMBEDDINGS_ON_INVALID || 'mark'); // 'skip' | 'mark'
+    const docs = [];
+    const chain = resolveProviderChain();
+    const activeProvider = chain[0] || '(unknown)';
+    for (let i = 0; i < docsMeta.length; i++) {
+      const vec = vectors[i];
+      const valid = isValidVector(vec);
+      if (strict && !valid) {
+        const base = { ...docsMeta[i], invalid_vector: true };
+        const dims = Array.isArray(vec) ? vec.length : 0;
+        const minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256);
+        const reasons = describeInvalidVector(vec, minDims);
+        if (onInvalid === 'skip') {
+          logger.warn(
+            { video_id: base.id, provider: activeProvider, dims, minDims, reasons },
+            'Skipping document due to invalid embedding vector'
+          );
+          continue;
+        } else {
+          docs.push({ ...base, vector: null });
+          logger.warn(
+            { video_id: base.id, provider: activeProvider, dims, minDims, reasons },
+            'Marking document invalid_vector=true and inserting with vector=null'
+          );
+        }
+      } else {
+        docs.push({ ...docsMeta[i], vector: vec });
+      }
+    }
 
     // Insert in smaller chunks with simple retry for stability
     const maxInsertAttempts = 3;
@@ -250,3 +296,8 @@ async function main() {
 }
 
 main();
+
+
+
+// Проверка корректности вектора: достаточная длина и все значения конечны
+// removed accidental appended validation block
