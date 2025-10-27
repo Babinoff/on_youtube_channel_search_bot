@@ -2,8 +2,8 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { env } = require("../config/env");
-const { openChannelTableIfExists, countIndexed } = require("../services/vector/lancedb");
-const { getChannelTableName } = require("../services/vector/lancedb_tables");
+const { logger } = require("../config/logger");
+const { openChannelTableIfExists, getChannelTableName } = require("../services/vector/lancedb");
 const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 function getDbDir() {

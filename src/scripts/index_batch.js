@@ -203,18 +203,30 @@ async function main() {
     function describeInvalidVector(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) {
       const reasons = [];
       if (vec == null) reasons.push('vector null');
-      else if (!Array.isArray(vec)) reasons.push('vector not array');
       else {
-        const dims = vec.length;
-        if (dims < minDims) reasons.push(`vector dims ${dims} < ${minDims}`);
-        if (!vec.every(Number.isFinite)) reasons.push('vector contains non-finite');
+        const isArrLike = Array.isArray(vec) || ArrayBuffer.isView(vec);
+        if (!isArrLike) reasons.push('vector not array-like');
+        else {
+          const dims = Number(vec.length || 0);
+          if (!Number.isFinite(dims)) reasons.push('length not finite');
+          if (dims < minDims) reasons.push(`vector dims ${dims} < ${minDims}`);
+          for (let i = 0; i < dims; i++) {
+            const v = Number(vec[i]);
+            if (!Number.isFinite(v)) { reasons.push('vector contains non-finite'); break; }
+          }
+        }
       }
       return reasons;
     }
 
     function isValidVector(v) {
       const minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256);
-      return Array.isArray(v) && v.length >= minDims && v.every(Number.isFinite);
+      const isArrLike = Array.isArray(v) || ArrayBuffer.isView(v);
+      if (!isArrLike) return false;
+      const len = Number(v.length || 0);
+      if (!Number.isFinite(len) || len < minDims) return false;
+      for (let i = 0; i < len; i++) { if (!Number.isFinite(Number(v[i]))) return false; }
+      return true;
     }
     const strict = !!env.EMBEDDINGS_STRICT_VALIDATION;
     const onInvalid = String(env.EMBEDDINGS_ON_INVALID || 'mark'); // 'skip' | 'mark'

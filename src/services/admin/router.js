@@ -36,8 +36,8 @@ function buildAdminHelpText() {
   const groups = [
     { title: 'Управление каналами', cmds: ['list_channels', 'add_channel', 'active_channel', 'set_channel', 'channel_db_list', 'channel_db_delete', 'channel_stats', 'channel_db_stats'] },
     { title: 'Индексация и превью', cmds: ['index_latest', 'index_batch', 'check_youtube', 'preview_latest'] },
-    { title: 'Блокировки', cmds: ['lock_status', 'lock_force'] },
     { title: 'Окружение и эмбеддинги', cmds: ['env_check', 'emb_status', 'emb_model', 'invalid_embeds', 'reindex_zero'] },
+    { title: 'Блокировки', cmds: ['lock_status', 'lock_force'] }
   ];
 
   const byName = new Map(ADMIN_COMMANDS.map(c => [c.name, c]));
@@ -55,10 +55,6 @@ function buildAdminHelpText() {
 
   const examples = [
     '',
-    'Примеры:',
-    '• /set_channel @хэндл',
-    '• /add_channel UCxxxxxxxxxxxxxxxxxxxxxxxxxx',
-    '• /index_batch --limit 100 --stop-on-first-known on',
   ];
 
   return [...lines, ...examples].join('\n');
@@ -124,6 +120,12 @@ function joinOutput(stdout, stderr) {
   if (out) return out;
   if (err) return err;
   return "<no output>";
+}
+
+function logAdminError(log, cmd, res) {
+  const text = "Ошибка " + cmd + " (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr);
+  log.error(text);
+  return text;
 }
 
 function runNodeScript(scriptRelPath, args = [], options = {}) {
@@ -229,9 +231,12 @@ function applyAdminCommands(bot) {
     log.info({ args }, `Вызов admin-команды: lock_status${args.length ? ' ' + args.join(' ') : ''}`);
     const name = args[0] || "indexing";
     const res = await runNodeScript("src/scripts/lock_status.js", [name], { timeoutMs: 60_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: lock_status");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка lock_status (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "lock_status", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // lock_force [name] [--force]
@@ -244,9 +249,12 @@ function applyAdminCommands(bot) {
     const hasForce = args.includes("--force") || args.includes("--yes");
     const callArgs = hasForce ? [name, "--force"] : [name];
     const res = await runNodeScript("src/scripts/lock_force.js", callArgs, { timeoutMs: 60_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: lock_force");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка lock_force (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "lock_force", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // channel_db_list
@@ -255,29 +263,12 @@ function applyAdminCommands(bot) {
     const log = getLoggerCtx(ctx, { area: "admin", cmd: "channel_db_list" });
     log.info("Вызов admin-команды: channel_db_list");
     const res = await runNodeScript("src/scripts/channel_db_list.js", [], { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_db_list");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_db_list (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
-  });
-
-  // channel_db_delete <input> [--yes]
-  bot.command("channel_db_delete", async (ctx) => {
-    if (!(await ensureAdmin(ctx))) return;
-    const args = extractArgs(ctx.message?.text, "channel_db_delete");
-    const log = getLoggerCtx(ctx, { area: "admin", cmd: "channel_db_delete" });
-    log.info({ args }, `Вызов admin-команды: channel_db_delete${args.length ? ' ' + args.join(' ') : ''}`);
-    const yes = args.includes("--yes") || args.includes("-y");
-    const input = args.find(a => a && !a.startsWith("-"));
-    if (!yes) {
-      await ctx.reply("Добавьте --yes для подтверждения удаления таблицы канала.");
+    if (!res.ok) {
+      const text = logAdminError(log, "channel_db_list", res);
+      await replySplit(ctx, text);
       return;
     }
-    const channel = input || await getActiveChannelId();
-    const callArgs = channel ? [channel, "--yes"] : ["--yes"];
-    const res = await runNodeScript("src/scripts/channel_db_delete.js", callArgs, { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_db_delete");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_db_delete (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // channel_stats [channel]
@@ -289,9 +280,12 @@ function applyAdminCommands(bot) {
     const input = args.find(a => a && !a.startsWith("-"));
     const channel = input || await getActiveChannelId();
     const res = await runNodeScript("src/scripts/channel_stats.js", channel ? [channel] : [], { timeoutMs: 180_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_stats");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_stats (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "channel_stats", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // channel_db_stats [channel]
@@ -303,9 +297,12 @@ function applyAdminCommands(bot) {
     const input = args.find(a => a && !a.startsWith("-"));
     const channel = input || await getActiveChannelId();
     const res = await runNodeScript("src/scripts/channel_db_stats.js", channel ? [channel] : [], { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_db_stats");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_db_stats (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "channel_db_stats", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // channel_db_delete <input> [--yes]
@@ -323,9 +320,12 @@ function applyAdminCommands(bot) {
     const channel = input || await getActiveChannelId();
     const callArgs = channel ? [channel, "--yes"] : ["--yes"];
     const res = await runNodeScript("src/scripts/channel_db_delete.js", callArgs, { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: channel_db_delete");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка channel_db_delete (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "channel_db_delete", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // preview_latest [env only]
@@ -334,9 +334,12 @@ function applyAdminCommands(bot) {
     const log = getLoggerCtx(ctx, { area: "admin", cmd: "preview_latest" });
     log.info("Вызов admin-команды: preview_latest");
     const res = await runNodeScript("src/scripts/preview_latest_10.js", [], { timeoutMs: 180_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: preview_latest");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка preview_latest (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "preview_latest", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // search_latest <query>
@@ -350,9 +353,12 @@ function applyAdminCommands(bot) {
       return;
     }
     const res = await runNodeScript("src/scripts/search_latest_10.js", [rawArgs], { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: search_latest");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка search_latest (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "search_latest", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // index_latest [channel?]
@@ -365,9 +371,12 @@ function applyAdminCommands(bot) {
     const channel = input || await getActiveChannelId();
     const callArgs = channel ? [channel] : [];
     const res = await runNodeScript("src/scripts/index_latest_10.js", callArgs, { timeoutMs: 300_000, maxBuffer: 2 * 1024 * 1024 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: index_latest");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка index_latest (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "index_latest", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // index_batch [--limit N] [--stop-on-first-known on|off] [--progress] [--progress-every N]
@@ -399,9 +408,12 @@ function applyAdminCommands(bot) {
     }
 
     const res = await runNodeScript("src/scripts/index_batch.js", callArgs, { timeoutMs: 20 * 60_000, maxBuffer: 2 * 1024 * 1024 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: index_batch");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка index_batch (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "index_batch", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   
@@ -412,9 +424,12 @@ function applyAdminCommands(bot) {
     const log = getLoggerCtx(ctx, { area: "admin", cmd: "env_check" });
     log.info("Вызов admin-команды: env_check");
     const res = await runNodeScript("src/scripts/env_check.js", [], { timeoutMs: 60_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: env_check");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка env_check (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "env_check", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // emb_status
@@ -423,9 +438,12 @@ function applyAdminCommands(bot) {
     const log = getLoggerCtx(ctx, { area: "admin", cmd: "emb_status" });
     log.info("Вызов admin-команды: emb_status");
     const res = await runNodeScript("src/scripts/emb_status.js", [], { timeoutMs: 120_000 });
-    if (!res.ok) log.error({ code: res.code }, "Ошибка выполнения admin-команды: emb_status");
-    const text = res.ok ? joinOutput(res.stdout, res.stderr) : ("Ошибка emb_status (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr));
-    await replySplit(ctx, text);
+    if (!res.ok) {
+      const text = logAdminError(log, "emb_status", res);
+      await replySplit(ctx, text);
+      return;
+    }
+    await replySplit(ctx, joinOutput(res.stdout, res.stderr));
   });
 
   // emb_model
@@ -476,8 +494,7 @@ function applyAdminCommands(bot) {
     if (args.includes("--show-all")) callArgs.push("--show-all");
     const res = await runNodeScript("src/scripts/list_invalid_vectors.js", callArgs, { timeoutMs: 180_000, maxBuffer: 2 * 1024 * 1024 });
     if (!res.ok) {
-      log.error({ code: res.code }, "Ошибка выполнения admin-команды: invalid_embeds");
-      const text = "Ошибка invalid_embeds (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr);
+      const text = logAdminError(log, "invalid_embeds", res);
       await replySplit(ctx, text);
       return;
     }
@@ -506,8 +523,7 @@ function applyAdminCommands(bot) {
 
     const res = await runNodeScript("src/scripts/reindex_zero_vectors.js", callArgs, { timeoutMs: 600_000, maxBuffer: 2 * 1024 * 1024 });
     if (!res.ok) {
-      log.error({ code: res.code }, "Ошибка выполнения admin-команды: reindex_zero");
-      const text = "Ошибка reindex_zero (code=" + res.code + ")\n" + joinOutput(res.stdout, res.stderr);
+      const text = logAdminError(log, "reindex_zero", res);
       await replySplit(ctx, text);
       return;
     }

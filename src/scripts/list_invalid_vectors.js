@@ -1,97 +1,81 @@
-require('dotenv').config();
-const { env } = require('../config/env');
-const { logger } = require('../config/logger');
-const { openChannelTableIfExists } = require('../services/vector/lancedb');
+require("dotenv").config();
+const { env } = require("../config/env");
+const { logger } = require("../config/logger");
+const { openChannelTableIfExists } = require("../services/vector/lancedb");
 const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
-function parseBooleanArg(flag, defaultVal = false) {
-  const idx = process.argv.findIndex(a => a === flag);
-  if (idx < 0) return defaultVal;
-  const next = process.argv[idx + 1];
-  if (!next || next.startsWith('--')) return true;
-  const v = String(next).toLowerCase();
-  if (['1','true','yes','on'].includes(v)) return true;
-  if (['0','false','no','off'].includes(v)) return false;
-  return true;
+function parseFlags() {
+  const args = process.argv.slice(2);
+  const input = args.find(a => a && !a.startsWith("-")) || null;
+  const showAll = args.includes("--show-all");
+  return { input, showAll };
 }
 
-function isVectorInvalid(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) {
-  if (vec == null) return true;
-  if (!Array.isArray(vec)) return true;
-  if (vec.length < minDims) return true;
-  for (let i = 0; i < vec.length; i++) {
-    if (!Number.isFinite(vec[i])) return true;
+function describeInvalid(vec, minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256)) {
+  const reasons = [];
+  if (vec == null) reasons.push("vector null");
+  else {
+    const isArrLike = Array.isArray(vec) || ArrayBuffer.isView(vec);
+    if (!isArrLike) reasons.push("vector not array-like");
+    else {
+      const dims = Number(vec.length || 0);
+      if (!Number.isFinite(dims)) reasons.push("length not finite");
+      if (dims < minDims) reasons.push(`vector dims ${dims} < ${minDims}`);
+      for (let i = 0; i < dims; i++) {
+        const v = Number(vec[i]);
+        if (!Number.isFinite(v)) { reasons.push("vector contains non-finite"); break; }
+      }
+    }
   }
-  return false;
+  return reasons;
 }
 
 async function main() {
-  const inputArg = process.argv[2];
-  const channelId = inputArg || await getActiveChannelId();
+  const { input, showAll } = parseFlags();
+  const channelId = input || await getActiveChannelId();
   if (!channelId) {
-    logger.error('Укажите channelId аргументом или установите активный канал в settings.json');
+    console.error("Активный канал не задан. Передайте аргумент или установите через админку.");
     process.exit(1);
   }
-  const showAll = parseBooleanArg('--show-all', false);
 
   const { table, tableName } = await openChannelTableIfExists(channelId);
   if (!table) {
-    logger.error({ tableName }, 'Таблица канала отсутствует');
-    process.exit(1);
+    console.log(`Таблица недоступна: ${tableName}`);
+    process.exit(0);
   }
-  logger.info({ tableName, channelId }, 'Сканирую таблицу для поиска невалидных векторов');
 
-  // Выбираем только нужные поля для анализа
-  let rows = [];
+  const selectFields = ["id", "title", "url", "vector", "invalid_vector", "published_at"]; 
+  let qb = typeof table.query === 'function' ? table.query() : table.search([]);
+  let rows;
   try {
-    const q = table.query().select(['id','title','vector','invalid_vector','published_at','url']);
-    if (typeof q.toArray === 'function') {
-      rows = await q.toArray();
-    } else {
-      rows = await q.limit(100000000).execute();
-    }
+    const q = typeof qb.select === 'function' ? qb.select(selectFields) : qb;
+    rows = typeof q.toArray === 'function' ? await q.toArray() : await q.execute();
   } catch (e) {
-    const msg = String(e?.message || '');
-    const schemaErr = msg.includes('No field named invalid_vector');
-    if (schemaErr) {
-      logger.warn({ err: e?.message }, 'Схема без invalid_vector, повторяю запрос без этого поля');
-      try {
-        const q2 = table.query().select(['id','title','vector','published_at','url']);
-        rows = typeof q2.toArray === 'function' ? await q2.toArray() : await q2.limit(100000000).execute();
-      } catch (e2) {
-        logger.error({ err: e2?.message }, 'Ошибка чтения таблицы');
-        process.exit(1);
-      }
-    } else {
-      logger.error({ err: e?.message }, 'Ошибка чтения таблицы');
-      process.exit(1);
-    }
+    logger.warn({ err: e?.message }, "Не удалось выполнить запрос; продолжаю без select()");
+    rows = [];
   }
 
-  const issues = [];
   const minDims = Number(env.EMBEDDINGS_MIN_DIMS || 256);
-  for (const r of rows) {
-    const reason = [];
-    if (r.invalid_vector === true) reason.push('invalid_vector flag');
-    const v = r.vector;
-    if (v == null) reason.push('vector null');
-    else if (!Array.isArray(v)) reason.push('vector not array');
-    else if (v.length < minDims) reason.push(`vector dims ${v.length} < ${minDims}`);
-    else if (!v.every(Number.isFinite)) reason.push('vector contains non-finite');
-    if (reason.length > 0) {
-      issues.push({ id: r.id, title: r.title, url: r.url || `https://youtu.be/${r.id}`, published_at: r.published_at || null, reason });
+  const invalid = [];
+  for (const r of (rows || [])) {
+    const vec = r?.vector;
+    const reasons = describeInvalid(vec, minDims);
+    if ((reasons.length > 0) || r?.invalid_vector === true) {
+      const dims = (Array.isArray(vec) || ArrayBuffer.isView(vec)) ? Number(vec.length || 0) : 0;
+      invalid.push({ id: r.id, title: r.title, url: r.url, dims, reasons });
     }
   }
 
-  const total = rows.length;
-  const invalidCount = issues.length;
-  logger.info({ tableName, channelId, total, invalidCount }, 'Анализ завершён');
-
-  const out = showAll ? issues : issues.slice(0, 20);
-  console.log(JSON.stringify({ tableName, channelId, total, invalidCount, sample: out }, null, 2));
+  console.log(`Таблица: ${tableName}`);
+  console.log(`Невалидные: ${invalid.length}`);
+  const list = showAll ? invalid : invalid.slice(0, 50);
+  for (const it of list) {
+    console.log(`${it.id} | dims=${it.dims} | reasons=${it.reasons.join(', ')}`);
+    if (it.url) console.log(it.url);
+  }
 }
 
-main().catch(err => {
-  console.error(err);
+main().catch((err) => {
+  console.error("invalid_embeds: ERROR", err?.message || err);
   process.exit(1);
 });

@@ -15,13 +15,18 @@ function ensureDir(dir) {
 }
 
 function averageVectors(vectors) {
-  const arr = (vectors || []).filter((v) => Array.isArray(v));
+  const arr = (vectors || []).filter((v) => Array.isArray(v) || ArrayBuffer.isView(v));
   if (arr.length === 0) return undefined;
-  const len = arr[0].length;
+  const len = Number(arr[0]?.length || 0);
+  if (!Number.isFinite(len) || len <= 0) return undefined;
   const sum = new Array(len).fill(0);
   for (const v of arr) {
-    if (!Array.isArray(v) || v.length !== len) continue;
-    for (let i = 0; i < len; i++) sum[i] += v[i] || 0;
+    const l = Number(v.length || 0);
+    if (!Number.isFinite(l) || l !== len) continue;
+    for (let i = 0; i < len; i++) {
+      const vi = Number(v[i]);
+      sum[i] += Number.isFinite(vi) ? vi : 0;
+    }
   }
   for (let i = 0; i < len; i++) sum[i] /= arr.length;
   return sum;
@@ -95,15 +100,50 @@ async function createChannelTable(channelId, docs) {
   return { db, table, tableName: name };
 }
 
+function normalizeVectorToNumberArray(vec) {
+  if (vec == null) return null;
+  if (Array.isArray(vec)) return vec.map(v => Number(v));
+  if (ArrayBuffer.isView(vec)) return Array.from(vec, v => Number(v));
+  return null;
+}
+
+function sanitizeDocsVectors(docs) {
+  return (docs || []).map(d => {
+    const normalized = normalizeVectorToNumberArray(d?.vector);
+    const out = { ...d };
+    if (normalized) {
+      out.vector = normalized;
+    } else if (d && d.vector != null && !Array.isArray(d.vector) && !ArrayBuffer.isView(d.vector)) {
+      out.vector = null;
+      if (out.invalid_vector !== true) out.invalid_vector = true;
+    }
+    return out;
+  });
+}
+
 async function addDocsToChannelTable(channelId, docs) {
   const { db, table, tableName } = await openChannelTableIfExists(channelId);
   if (!table) {
     logger.info({ tableName }, "Создаю таблицу канала в LanceDB");
-    const created = await createChannelTable(channelId, docs);
+    const created = await createChannelTable(channelId, sanitizeDocsVectors(docs));
     return created;
   }
-  await table.add(docs);
-  logger.info({ tableName, inserted: docs.length }, "Добавлены документы в таблицу канала");
+  const prepared = sanitizeDocsVectors(docs);
+  await table.add(prepared);
+  logger.info({ tableName, inserted: prepared.length }, "Добавлены документы в таблицу канала");
+  return { db, table, tableName };
+}
+
+async function safeUpdateOrReplace(channelId, docs) {
+  const { db, table, tableName } = await openChannelTableIfExists(channelId);
+  const prepared = sanitizeDocsVectors(docs);
+  if (!table) {
+    logger.warn({ tableName }, "Таблица канала отсутствует; создаю новую для апдейта");
+    const created = await createChannelTable(channelId, prepared);
+    return created;
+  }
+  await table.add(prepared);
+  logger.info({ tableName, upserted: prepared.length }, "Обновлены/вставлены документы в таблицу канала");
   return { db, table, tableName };
 }
 
@@ -526,4 +566,4 @@ async function searchTopK(query, k = 5, opts = {}) {
   }));
 }
 
-module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK, applyAdaptiveFilter, getChannelTableName, openChannelTableIfExists, addDocsToChannelTable, createChannelTable }
+module.exports = { connectDb, createTestTable, openLatestTestTable, findLatestTestTableName, searchTopK, applyAdaptiveFilter, getChannelTableName, openChannelTableIfExists, addDocsToChannelTable, createChannelTable, safeUpdateOrReplace }

@@ -1,7 +1,8 @@
 require("dotenv").config();
 const { env } = require("../config/env");
-const { createYouTubeClient, resolveChannelId, getUploadsPlaylistId, listUploadsVideos } = require("../services/youtube/latest");
-const { openChannelTableIfExists, getChannelTableName, countIndexed } = require("../services/vector/lancedb");
+const { resolveChannelId, createYouTubeClient, getUploadsPlaylistId, listUploadsVideos } = require("../services/youtube/client");
+const { logger } = require("../config/logger");
+const { openChannelTableIfExists, getChannelTableName } = require("../services/vector/lancedb");
 const { getActiveChannelId } = require("../services/admin/server_settings_store");
 
 async function countUploads(channelId) {
@@ -27,7 +28,7 @@ async function countIndexed(channelId) {
   if (!table) return { count: 0, exists: false };
   // Совместимо с используемой версией LanceDB: используем query().select(["id"]).toArray()
   const qb = table.query().select(["id"]);
-  const rows = await qb.toArray();
+  const rows = typeof qb.toArray === 'function' ? await qb.toArray() : await qb.limit(100000000).toArray();
   return { count: Array.isArray(rows) ? rows.length : 0, exists: true };
 }
 
