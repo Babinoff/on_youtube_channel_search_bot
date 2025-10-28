@@ -12,7 +12,16 @@ async function getAdminChannels() {
   }
 
   const serverChannels = Array.isArray(settings.channels) ? settings.channels : [];
-  const serverResults = serverChannels.map(c => ({ id: c.id, title: c.title || c.id, handle: c.handle || null, source: "server" }));
+  // Нормализация: поддерживаем как объекты каналов, так и строковые id
+  const serverResults = serverChannels
+    .map((c) => {
+      if (typeof c === "string") {
+        return { id: c, title: c, handle: null, source: "server" };
+      }
+      const id = c?.id;
+      return { id, title: (c?.title || id), handle: (c?.handle || null), source: "server" };
+    })
+    .filter((c) => !!c.id);
 
   cache = { rawKey: cacheKey, list: serverResults, ts: now };
   return serverResults;

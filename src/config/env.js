@@ -50,24 +50,22 @@ function parseBool(input, defaultVal = false) {
   return defaultVal;
 }
 
-function readSettingsSync() {
-  try {
-    const settingsPath = path.resolve(process.cwd(), "data", "server", "settings.json");
-    if (!fs.existsSync(settingsPath)) return null;
-    const raw = fs.readFileSync(settingsPath, "utf8");
-    return JSON.parse(raw);
-  } catch (_) {
-    return null;
-  }
-}
+// function readSettingsSync() {
+//   try {
+//     const settingsPath = path.resolve(process.cwd(), "data", "server", "settings.json");
+//     if (!fs.existsSync(settingsPath)) return null;
+//     const raw = fs.readFileSync(settingsPath, "utf8");
+//     return JSON.parse(raw);
+//   } catch (_) {
+//     return null;
+//   }
+// }
 
 const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : undefined,
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-  YOUTUBE_CHANNEL_URL: process.env.YOUTUBE_CHANNEL_URL || "",
-  YOUTUBE_CHANNEL_HANDLE: process.env.YOUTUBE_CHANNEL_HANDLE || "",
   EMBEDDINGS_PROVIDER: process.env.EMBEDDINGS_PROVIDER || "xenova",
   EMBEDDINGS_PROVIDER_CHAIN: process.env.EMBEDDINGS_PROVIDER_CHAIN || "",
   MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
@@ -111,17 +109,19 @@ const env = {
   SEARCH_MAX_K: Number(process.env.SEARCH_MAX_K || 20),
   // Фильтровать записи с invalid_vector в обычном поиске
   SEARCH_FILTER_INVALID_EMBEDS: parseBool(process.env.SEARCH_FILTER_INVALID_EMBEDS, true),
+  // Разрешить топ‑K фоллбек при неизвестной метрике/недостатке результатов
+  SEARCH_FALLBACK_TOPK: parseBool(process.env.SEARCH_FALLBACK_TOPK, false),
 
   // YouTube shorts classification
   SHORTS_MAX_SECONDS: Number(process.env.SHORTS_MAX_SECONDS || 60),
 
   // Description normalization patterns
   INDEX_DESC_AD_LINE_PREFIX_CHARS: process.env.INDEX_DESC_AD_LINE_PREFIX_CHARS || '•,+,*,—,–,-,►,➡,→,➜',
-  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boosty,ссылки,links',
+  INDEX_DESC_STRIP_AFTER_PATTERNS: process.env.INDEX_DESC_STRIP_AFTER_PATTERNS || 'https,📺 Больше контента здесь:,ПОДДЕРЖАТЬ НАС МОЖНО,+++,По вопросам сотрудничества,подписывайтесь,subscribe,донат,donate,patreon,boosty,бусти,подписка,follow',
 
   // Indexing flow controls
   INDEX_STOP_ON_FIRST_KNOWN: parseBool(process.env.INDEX_STOP_ON_FIRST_KNOWN, false),
-  LANCEDB_INSERT_BATCH_SIZE: Number(process.env.LANCEDB_INSERT_BATCH_SIZE || 50),
+  LANCEDB_INSERT_BATCH_SIZE: Number(process.env.LANCEDB_INSERT_BATCH_SIZE || 100),
   LANCEDB_INSERT_MAX_ATTEMPTS: Number(process.env.LANCEDB_INSERT_MAX_ATTEMPTS || 3),
 
   // Compatibility helper

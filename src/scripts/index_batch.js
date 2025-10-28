@@ -88,11 +88,12 @@ async function main() {
     }
     
 
-    // Отныне аргумент из CLI имеет приоритет над settings.json
-    const inputArg = process.argv[2];
-    const useArg = Boolean(inputArg);
+    // Аргумент из CLI имеет приоритет над settings.json,
+    // но мы учитываем ТОЛЬКО позиционный аргумент без префикса "-"
+    const positionalArg = process.argv.slice(2).find(a => a && !String(a).startsWith("-"));
+    const useArg = Boolean(positionalArg);
     const activeId = await getActiveChannelId();
-    const input = useArg ? inputArg : activeId;
+    const input = useArg ? positionalArg : activeId;
     if (!input) {
       logger.info("Активный канал не задан. Установите через /set_channel в админке или передайте аргумент: npm run index:batch -- <channelId|url|@handle> --limit 100");
       process.exit(1);
